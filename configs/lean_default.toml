@@ -1,0 +1,38 @@
+[population]
+size = 50
+elite_k = 5
+
+[selection]
+strategy = "lexicase"
+tournament_size = 3
+epsilon = 0.0
+
+[mutation]
+schedule = "adaptive"
+llm_weight = 0.6
+cheap_weight = 0.4
+crossover_weight = 0.2
+
+[llm]
+model = "claude-sonnet-4-20250514"
+temperature = 0.7
+max_tokens = 4096
+max_calls = 1000
+max_cost_usd = 50.0
+
+[eval]
+max_concurrent = 4
+timeout_seconds = 60.0
+seed = 42
+
+[backend]
+name = "lean"
+theorem_statement = "theorem IsPositiveDefinite.norm_le_one {f : ℝ → ℂ} (hf : IsPositiveDefinite f) (h0 : f 0 = 1) : ∀ ξ, ‖f ξ‖ ≤ 1"
+project_dir = "/Users/sglink/Desktop/Projects/LeanLevy"
+repl_path = ""
+
+[evolution]
+max_generations = 100
+stagnation_window = 10
+checkpoint_every = 10
+log_level = "INFO"

@@ -1,0 +1,146 @@
+"""LLM client with retry logic and cost estimation."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import time
+from dataclasses import dataclass
+
+import anthropic
+
+logger = logging.getLogger(__name__)
+
+# Pricing per million tokens: (input_cost, output_cost) in USD
+_MODEL_PRICING: dict[str, tuple[float, float]] = {
+    "sonnet": (3.0, 15.0),
+    "haiku": (0.25, 1.25),
+    "opus": (15.0, 75.0),
+}
+
+_DEFAULT_PRICING = _MODEL_PRICING["sonnet"]
+
+
+def _pricing_for_model(model: str) -> tuple[float, float]:
+    """Return (input_cost, output_cost) per million tokens for the given model name."""
+    model_lower = model.lower()
+    for key, pricing in _MODEL_PRICING.items():
+        if key in model_lower:
+            return pricing
+    return _DEFAULT_PRICING
+
+
+@dataclass
+class LLMResponse:
+    """Response from an LLM call."""
+
+    text: str
+    input_tokens: int
+    output_tokens: int
+    model: str
+
+
+class LLMClient:
+    """Thin wrapper around the Anthropic API with retry and cost estimation."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        max_retries: int = 3,
+        base_delay: float = 1.0,
+    ) -> None:
+        self._api_key = api_key
+        self._max_retries = max_retries
+        self._base_delay = base_delay
+
+    def generate(
+        self,
+        prompt: str,
+        system: str,
+        model: str,
+        temperature: float,
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        """Call the Anthropic API synchronously with exponential-backoff retry."""
+        client = anthropic.Anthropic(api_key=self._api_key)
+        last_exc: Exception | None = None
+
+        for attempt in range(self._max_retries):
+            try:
+                response = client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = response.content[0].text  # type: ignore[union-attr]
+                return LLMResponse(
+                    text=text,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    model=model,
+                )
+            except (anthropic.RateLimitError, anthropic.APIError) as exc:
+                last_exc = exc
+                delay = self._base_delay * (2**attempt)
+                logger.warning(
+                    "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    self._max_retries,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+
+        msg = f"LLM call failed after {self._max_retries} retries"
+        raise RuntimeError(msg) from last_exc
+
+    async def async_generate(
+        self,
+        prompt: str,
+        system: str,
+        model: str,
+        temperature: float,
+        max_tokens: int = 4096,
+    ) -> LLMResponse:
+        """Call the Anthropic API asynchronously with exponential-backoff retry."""
+        client = anthropic.AsyncAnthropic(api_key=self._api_key)
+        last_exc: Exception | None = None
+
+        for attempt in range(self._max_retries):
+            try:
+                response = await client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    system=system,
+                    messages=[{"role": "user", "content": prompt}],
+                )
+                text = response.content[0].text  # type: ignore[union-attr]
+                return LLMResponse(
+                    text=text,
+                    input_tokens=response.usage.input_tokens,
+                    output_tokens=response.usage.output_tokens,
+                    model=model,
+                )
+            except (anthropic.RateLimitError, anthropic.APIError) as exc:
+                last_exc = exc
+                delay = self._base_delay * (2**attempt)
+                logger.warning(
+                    "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
+                    attempt + 1,
+                    self._max_retries,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+
+        msg = f"LLM call failed after {self._max_retries} retries"
+        raise RuntimeError(msg) from last_exc
+
+    @staticmethod
+    def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
+        """Estimate USD cost for the given token counts and model."""
+        input_rate, output_rate = _pricing_for_model(model)
+        return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000

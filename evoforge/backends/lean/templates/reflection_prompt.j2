@@ -1,0 +1,26 @@
+You are analyzing the current state of an evolutionary proof search.
+
+## Population Summary
+- Best fitness: {{ best_fitness }}
+- Average fitness: {{ avg_fitness }}
+- Population size: {{ pop_size }}
+- Generation: {{ generation }}
+- Diversity (entropy): {{ diversity }}
+
+## Search Memory
+{{ memory_section }}
+
+## Top Individuals
+{% for ind in top_individuals %}
+- Fitness {{ ind.fitness.primary }}: {{ ind.genome[:200] }}
+{% endfor %}
+
+## Instructions
+Analyze the search state and provide:
+1. strategies_to_try: List promising new approaches
+2. strategies_to_avoid: List approaches that seem unproductive
+3. useful_primitives: List tactics or patterns that appear effective
+4. population_diagnosis: Brief assessment of population health
+5. suggested_temperature: Float between 0.0 and 1.5
+
+Return your analysis as a JSON object.
