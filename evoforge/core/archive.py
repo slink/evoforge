@@ -104,6 +104,10 @@ class Archive:
         self._engine = create_async_engine(url)
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
 
+    async def close(self) -> None:
+        """Dispose the async engine and release all connections."""
+        await self._engine.dispose()
+
     async def create_tables(self) -> None:
         """Create all tables if they do not already exist."""
         async with self._engine.begin() as conn:

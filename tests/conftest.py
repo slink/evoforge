@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -44,8 +45,9 @@ class FakeLLMResponse:
 
 
 @pytest.fixture
-async def archive() -> Archive:
+async def archive() -> AsyncIterator[Archive]:
     """Create an in-memory archive with all tables ready."""
     a = Archive("sqlite+aiosqlite://")
     await a.create_tables()
-    return a
+    yield a
+    await a.close()
