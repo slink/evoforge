@@ -40,6 +40,7 @@ name = "lean"
 theorem_statement = "theorem IsPositiveDefinite.norm_le_one {f : ℝ → ℂ} (hf : IsPositiveDefinite f) (h0 : f 0 = 1) : ∀ ξ, ‖f ξ‖ ≤ 1"
 project_dir = "/Users/sglink/Desktop/Projects/LeanLevy"
 repl_path = ""
+imports = "import LeanLevy"
 
 [evolution]
 max_generations = 200

@@ -49,6 +49,7 @@ def main() -> None:
         theorem_statement=config.backend.theorem_statement,
         project_dir=project_dir,
         repl_path=repl_path,
+        imports=config.backend.imports,
     )
 
     # Create archive (in-memory SQLite)

@@ -71,6 +71,7 @@ class BackendConfig(BaseModel):
     theorem_statement: str = ""
     project_dir: str = ""
     repl_path: str | None = None
+    imports: str = ""
 
 
 class EvolutionConfig(BaseModel):

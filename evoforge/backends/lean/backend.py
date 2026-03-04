@@ -73,12 +73,14 @@ class LeanBackend(Backend):
         theorem_statement: str,
         project_dir: str,
         repl_path: str | None = None,
+        imports: str = "",
     ) -> None:
         self.theorem_statement = theorem_statement
         self.project_dir = project_dir
         self._evaluator: LeanStepwiseEvaluator | None = None
         self._repl: LeanREPLProcess | None = None
         self.repl_path = repl_path
+        self._imports = imports
         self._repl_lock = asyncio.Lock()
         self._prefix_cache: dict[str, int] = {}
 
@@ -97,6 +99,11 @@ class LeanBackend(Backend):
         """Start the Lean REPL and initialize the stepwise evaluator."""
         self._repl = LeanREPLProcess(self.project_dir, self.repl_path)
         await self._repl.start()
+
+        # Send user-configured imports (e.g. "import LeanLevy")
+        if self._imports:
+            import_cmd: dict[str, object] = {"cmd": self._imports}
+            await self._repl.send_command(import_cmd)
 
         # Send theorem initialization to verify the REPL is working
         init_cmd: dict[str, object] = {"cmd": f"{self.theorem_statement} := by\n sorry"}

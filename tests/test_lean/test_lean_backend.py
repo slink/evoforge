@@ -6,6 +6,9 @@ format_reflection_prompt(), and the corrected format_crossover_prompt() signatur
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock, call, patch
+
+import evoforge.backends.lean.backend as backend_mod
 from evoforge.backends.lean.backend import LeanBackend
 from evoforge.core.types import Fitness
 from tests.conftest import make_individual
@@ -184,3 +187,53 @@ class TestLeanBackendFormatCrossoverPrompt:
         # Should not raise — this confirms the signature accepts Individual
         result = backend.format_crossover_prompt(parent_a, parent_b, context=None)
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# startup() import command ordering
+# ---------------------------------------------------------------------------
+
+
+class TestLeanBackendStartup:
+    async def test_startup_sends_import_before_theorem(self) -> None:
+        """startup() should send the import cmd first, then the theorem cmd."""
+        mock_repl = MagicMock()
+        mock_repl.start = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"sorries": []})
+
+        backend = LeanBackend(
+            theorem_statement="theorem T : True",
+            project_dir="/tmp/proj",
+            imports="import LeanLevy",
+        )
+        # Inject mock REPL so we don't spawn a real process
+        backend._repl = mock_repl  # type: ignore[assignment]
+
+        with patch.object(backend_mod, "LeanREPLProcess", return_value=mock_repl):
+            await backend.startup()
+
+        # Verify send_command was called twice in the correct order
+        assert mock_repl.send_command.await_count == 2
+        calls = mock_repl.send_command.call_args_list
+        assert calls[0] == call({"cmd": "import LeanLevy"})
+        assert calls[1] == call({"cmd": "theorem T : True := by\n sorry"})
+
+    async def test_startup_skips_import_when_empty(self) -> None:
+        """startup() should not send an import cmd when imports is empty."""
+        mock_repl = MagicMock()
+        mock_repl.start = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"sorries": []})
+
+        backend = LeanBackend(
+            theorem_statement="theorem T : True",
+            project_dir="/tmp/proj",
+            imports="",
+        )
+
+        with patch.object(backend_mod, "LeanREPLProcess", return_value=mock_repl):
+            await backend.startup()
+
+        # Only the theorem init command should be sent
+        assert mock_repl.send_command.await_count == 1
+        calls = mock_repl.send_command.call_args_list
+        assert calls[0] == call({"cmd": "theorem T : True := by\n sorry"})

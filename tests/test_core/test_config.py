@@ -8,6 +8,7 @@ import pytest
 
 from evoforge.core.config import (
     AblationConfig,
+    BackendConfig,
     DiversityConfig,
     EvoforgeConfig,
     LLMConfig,
@@ -73,6 +74,26 @@ class TestAblationConfig:
         assert cfg.disable_memory is False
         assert cfg.disable_cheap_operators is False
         assert cfg.disable_credit is False
+
+
+# ---------------------------------------------------------------------------
+# BackendConfig imports field
+# ---------------------------------------------------------------------------
+
+
+class TestBackendConfig:
+    def test_imports_default_empty(self) -> None:
+        cfg = BackendConfig()
+        assert cfg.imports == ""
+
+    def test_imports_accepts_value(self) -> None:
+        cfg = BackendConfig(imports="import Foo")
+        assert cfg.imports == "import Foo"
+
+    def test_imports_round_trip_toml(self) -> None:
+        """The lean_default.toml should load the imports field."""
+        cfg = load_config(Path(__file__).resolve().parents[2] / "configs" / "lean_default.toml")
+        assert cfg.backend.imports == "import LeanLevy"
 
 
 # ---------------------------------------------------------------------------

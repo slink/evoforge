@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -320,6 +321,44 @@ class TestAsyncEvaluator:
 
         for ind in results:
             assert ind.fitness is not None
+
+    async def test_serializes_dataclass_diagnostics(self) -> None:
+        """Backend returning a frozen dataclass as diagnostics should serialize via asdict()."""
+
+        @dataclass(frozen=True)
+        class FakeDiagnostics:
+            success: bool
+            errors: list[str]
+            detail: str | None
+
+        diag = FakeDiagnostics(success=False, errors=["type error"], detail=None)
+        backend = _make_backend(
+            fitness=_make_fitness(primary=0.5),
+            diagnostics=diag,
+        )
+        archive = _make_archive()
+
+        evaluator = AsyncEvaluator(
+            backend=backend,
+            archive=archive,
+            backend_version="v1.0",
+            config_hash="cfg_abc",
+        )
+
+        ind = _make_individual(ir_hash="diag_hash")
+        result = await evaluator.evaluate(ind)
+
+        assert result.fitness is not None
+        assert result.fitness.primary == pytest.approx(0.5)
+        # Verify store_fitness received valid JSON string
+        archive.store_fitness.assert_awaited_once()
+        call_kwargs = archive.store_fitness.call_args.kwargs
+        import json
+
+        parsed = json.loads(call_kwargs["diagnostics_json"])
+        assert parsed["success"] is False
+        assert parsed["errors"] == ["type error"]
+        assert parsed["detail"] is None
 
 
 # ---------------------------------------------------------------------------

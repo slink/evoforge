@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Callable
 from dataclasses import replace
@@ -123,7 +124,12 @@ class AsyncEvaluator:
             return replace(individual, fitness=_FALLBACK_FITNESS)
 
         # 3. Store in cache
-        diagnostics_json = json.dumps(diagnostics) if diagnostics is not None else "{}"
+        if diagnostics is None:
+            diagnostics_json = "{}"
+        elif dataclasses.is_dataclass(diagnostics) and not isinstance(diagnostics, type):
+            diagnostics_json = json.dumps(dataclasses.asdict(diagnostics))
+        else:
+            diagnostics_json = json.dumps(diagnostics)
         await self._cache.put(
             individual.ir_hash,
             self._backend_version,
