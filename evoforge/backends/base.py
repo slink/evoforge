@@ -65,6 +65,13 @@ class Backend(ABC):
         ...
 
     @abstractmethod
+    def format_crossover_prompt(
+        self, parent_a: Individual, parent_b: Individual, context: Any
+    ) -> str:
+        """Format a crossover prompt for the LLM given two parent individuals."""
+        ...
+
+    @abstractmethod
     def extract_genome(self, raw_text: str) -> str | None:
         """Extract a genome string from raw LLM output."""
         ...
@@ -82,4 +89,26 @@ class Backend(ABC):
     @abstractmethod
     def recommended_selection(self) -> str:
         """Return the name of the recommended selection strategy."""
+        ...
+
+    @abstractmethod
+    def version(self) -> str:
+        """Return a version string for cache-keying (e.g. ``'lean-0.3.1'``)."""
+        ...
+
+    @abstractmethod
+    def eval_config_hash(self) -> str:
+        """Return a hash of the evaluation config for cache-keying."""
+        ...
+
+    @abstractmethod
+    def format_reflection_prompt(
+        self, population: list[Individual], memory: Any, generation: int
+    ) -> str:
+        """Format a reflection prompt summarising population state."""
+        ...
+
+    @abstractmethod
+    def default_operator_weights(self) -> dict[str, float]:
+        """Return default mutation-operator weights for this domain."""
         ...
