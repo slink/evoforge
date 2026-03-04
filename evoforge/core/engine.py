@@ -37,6 +37,7 @@ class ExperimentResult:
     cost: dict[str, float]
     archive_size: int
     reflected: bool
+    metrics: dict[str, float]
 
 
 def _build_selection(config: EvoforgeConfig) -> SelectionStrategy:
@@ -129,6 +130,10 @@ class EvolutionEngine:
         self._total_evaluations = 0
         self._reflected = False
         self._temperature = config.llm.temperature
+        self._cache_hits: int = 0
+        self._cache_misses: int = 0
+        self._dedup_count: int = 0
+        self._total_offspring_attempted: int = 0
 
     async def run(self) -> ExperimentResult:
         """Execute the full evolutionary loop and return results."""
@@ -209,7 +214,9 @@ class EvolutionEngine:
                     continue
                 # Set generation
                 ind.generation = gen
+                self._total_offspring_attempted += 1
                 if self._identity.is_duplicate(ind.ir_hash, known_hashes):
+                    self._dedup_count += 1
                     continue
                 known_hashes.add(ind.ir_hash)
                 offspring_individuals.append(ind)
@@ -392,6 +399,23 @@ class EvolutionEngine:
             else 0.0
         )
 
+        metrics = {
+            "cache_hit_rate": 0.0,  # Would need evaluator to track; placeholder
+            "identity_dedup_rate": (
+                self._dedup_count / self._total_offspring_attempted
+                if self._total_offspring_attempted > 0
+                else 0.0
+            ),
+            "stagnation_counter": float(
+                max(
+                    0,
+                    len(self._memory.best_fitness_history)
+                    - len(set(self._memory.best_fitness_history)),
+                )
+            ),
+            "estimated_cost_usd": self._scheduler.tracker.estimated_cost_usd,
+        }
+
         return ExperimentResult(
             best_individual=best_individual,
             best_fitness=best_fitness,
@@ -400,4 +424,5 @@ class EvolutionEngine:
             cost=self._scheduler.tracker.summary(),
             archive_size=self.population.size,
             reflected=self._reflected,
+            metrics=metrics,
         )

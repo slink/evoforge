@@ -355,3 +355,41 @@ class TestBestIndividualTracked:
         assert result.best_individual is not None
         assert result.best_individual.fitness is not None
         assert result.best_individual.fitness.primary == result.best_fitness
+
+
+class TestExperimentResultMetrics:
+    """ExperimentResult.metrics contains design-specified tracking metrics."""
+
+    async def _run_engine(self, archive: Archive) -> ExperimentResult:
+        """Helper: run a short experiment and return the result."""
+        config = _make_config(max_generations=3, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(
+            config=config,
+            backend=backend,
+            archive=archive,
+            llm_client=None,
+        )
+        return await engine.run()
+
+    async def test_result_has_metrics_dict(self, archive: Archive) -> None:
+        result = await self._run_engine(archive)
+        assert isinstance(result.metrics, dict)
+
+    async def test_result_has_cache_hit_rate(self, archive: Archive) -> None:
+        result = await self._run_engine(archive)
+        assert "cache_hit_rate" in result.metrics
+        assert isinstance(result.metrics["cache_hit_rate"], float)
+
+    async def test_result_has_identity_dedup_rate(self, archive: Archive) -> None:
+        result = await self._run_engine(archive)
+        assert "identity_dedup_rate" in result.metrics
+        assert isinstance(result.metrics["identity_dedup_rate"], float)
+
+    async def test_result_has_stagnation_counter(self, archive: Archive) -> None:
+        result = await self._run_engine(archive)
+        assert "stagnation_counter" in result.metrics
+
+    async def test_result_has_estimated_cost(self, archive: Archive) -> None:
+        result = await self._run_engine(archive)
+        assert "estimated_cost_usd" in result.metrics
