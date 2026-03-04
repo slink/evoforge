@@ -26,6 +26,7 @@ class MutationContext:
     temperature: float
     backend: Any  # Backend reference — typed as Any for the same reason
     credits: list[Credit]
+    guidance_individual: Any = None  # Individual | None, typed as Any to avoid circular imports
 
 
 @dataclass
