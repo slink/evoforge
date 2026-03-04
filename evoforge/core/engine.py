@@ -157,6 +157,15 @@ class EvolutionEngine:
 
         # --- Subsequent generations ---
         for gen in range(1, max_gen + 1):
+            # Temperature scheduling
+            self._temperature = self._compute_temperature(
+                generation=gen,
+                max_generations=max_gen,
+                start=self.config.llm.temperature_start,
+                end=self.config.llm.temperature_end,
+                schedule=self.config.llm.temperature_schedule,
+            )
+
             # Check stopping conditions
             if self._scheduler.should_stop():
                 logger.info("Budget exhausted at generation %d", gen)
@@ -209,7 +218,7 @@ class EvolutionEngine:
             if not offspring_individuals:
                 logger.debug("No novel offspring in generation %d", gen)
                 self._memory.update([], gen)
-                self._check_stagnation(gen)
+                await self._check_stagnation(gen)
                 continue
 
             # Evaluate offspring
@@ -256,7 +265,7 @@ class EvolutionEngine:
             self._memory.update(credited_offspring, gen)
 
             # Stagnation check
-            self._check_stagnation(gen)
+            await self._check_stagnation(gen)
 
             logger.info(
                 "Generation %d: pop_size=%d, best_fitness=%.4f, diversity=%.4f, evals=%d",
@@ -338,16 +347,40 @@ class EvolutionEngine:
             return best[0].fitness.primary
         return 0.0
 
-    def _check_stagnation(self, generation: int) -> None:
+    async def _check_stagnation(self, generation: int) -> None:
         """Check for stagnation and trigger reflection if needed."""
-        if self._memory.is_stagnant():
-            logger.info(
-                "Stagnation detected at generation %d — triggering reflection",
-                generation,
+        if not self._memory.is_stagnant():
+            return
+        logger.info(
+            "Stagnation detected at generation %d — triggering reflection",
+            generation,
+        )
+        self._reflected = True
+        max_temp = self.config.llm.temperature_start + 0.3
+        self._temperature = min(self._temperature + 0.2, max_temp)
+        if self.llm_client is not None:
+            await self._reflect(generation)
+
+    async def _reflect(self, generation: int) -> None:
+        """Call the LLM for a reflection on the current population state."""
+        try:
+            prompt = self.backend.format_reflection_prompt(
+                population=self.population.get_all(),
+                memory=self._memory,
+                generation=generation,
             )
-            self._reflected = True
-            # Adjust temperature to encourage exploration
-            self._temperature = min(self._temperature + 0.1, 1.5)
+            system = self.backend.system_prompt()
+            model = self.config.llm.reflection_model
+            response = await self.llm_client.async_generate(
+                prompt,
+                system,
+                model,
+                0.7,
+                self.config.llm.max_tokens,
+            )
+            logger.info("Reflection response received (%d chars)", len(response.text))
+        except Exception:
+            logger.warning("Reflection LLM call failed", exc_info=True)
 
     def _build_result(self, generations_run: int) -> ExperimentResult:
         """Build the final experiment result."""
