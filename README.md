@@ -58,12 +58,11 @@ scripts/
 
 - Core framework: implemented
 - Lean 4 backend: implemented
-- CFD backend: not yet
-- 237 tests, strict mypy, ruff
+- 337 tests, strict mypy, ruff
 
 ## Running with Lean
 
-Requires a sibling [LeanLevy](https://github.com/your-org/LeanLevy) project with the REPL built:
+Requires a sibling [LeanLevy](https://github.com/slink/LeanLevy) project with the REPL built:
 
 ```bash
 # Build REPL in LeanLevy (sibling directory)
@@ -71,9 +70,9 @@ cd ../LeanLevy
 lake update && lake build repl
 cd ../evoforge
 
-# Run (defaults to ../LeanLevy)
+# Run (project dir comes from backend.project_dir in the config file)
 uv run python scripts/run.py --config configs/lean_default.toml --max-generations 3
 
-# Or specify a custom path
+# Or override with env var
 LEAN_PROJECT_DIR=/other/path/to/LeanLevy uv run python scripts/run.py --config configs/lean_default.toml --max-generations 3
 ```
