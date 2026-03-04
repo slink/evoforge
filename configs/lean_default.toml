@@ -37,10 +37,10 @@ seed = 42
 
 [backend]
 name = "lean"
-theorem_statement = "theorem IsPositiveDefinite.norm_le_one {f : ℝ → ℂ} (hf : IsPositiveDefinite f) (h0 : f 0 = 1) : ∀ ξ, ‖f ξ‖ ≤ 1"
+theorem_statement = "theorem norm_le_one {φ : ℝ → ℂ} (hφ : IsPositiveDefinite φ) (h0 : φ 0 = 1) (ξ : ℝ) : ‖φ ξ‖ ≤ 1"
 project_dir = "/Users/sglink/Desktop/Projects/LeanLevy"
 repl_path = ""
-imports = "import LeanLevy"
+imports = "import LeanLevy\nopen ProbabilityTheory ProbabilityTheory.IsPositiveDefinite"
 
 [evolution]
 max_generations = 200

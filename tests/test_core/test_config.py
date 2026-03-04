@@ -93,7 +93,8 @@ class TestBackendConfig:
     def test_imports_round_trip_toml(self) -> None:
         """The lean_default.toml should load the imports field."""
         cfg = load_config(Path(__file__).resolve().parents[2] / "configs" / "lean_default.toml")
-        assert cfg.backend.imports == "import LeanLevy"
+        expected = "import LeanLevy\nopen ProbabilityTheory ProbabilityTheory.IsPositiveDefinite"
+        assert cfg.backend.imports == expected
 
 
 # ---------------------------------------------------------------------------
