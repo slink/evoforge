@@ -49,6 +49,9 @@ def main() -> None:
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
+    # Suppress noisy third-party loggers that clash with the rich progress bar
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("anthropic").setLevel(logging.WARNING)
 
     # Create backend
     from evoforge.backends.lean.backend import LeanBackend

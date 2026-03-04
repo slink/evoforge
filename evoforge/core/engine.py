@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
+    from rich.logging import RichHandler
     from rich.progress import (
         BarColumn,
         MofNCompleteColumn,
@@ -221,9 +222,17 @@ class EvolutionEngine:
 
             gen_range = range(self._start_generation, max_gen + 1)
 
+            rich_handler: logging.Handler | None = None
             if progress is not None:
                 progress.start()
                 task_id = progress.add_task("evolving", total=total_gens, status="")
+                # Route log lines through Rich so they render above the progress bar
+                rich_handler = RichHandler(
+                    console=progress.console,
+                    show_path=False,
+                    show_time=True,
+                )
+                logging.getLogger().addHandler(rich_handler)
 
             try:
                 for gen in gen_range:
@@ -388,6 +397,8 @@ class EvolutionEngine:
                     if progress is not None:
                         progress.update(task_id, advance=1, status=self._gen_status(gen))
             finally:
+                if rich_handler is not None:
+                    logging.getLogger().removeHandler(rich_handler)
                 if progress is not None:
                     progress.stop()
         finally:
