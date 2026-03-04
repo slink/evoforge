@@ -167,6 +167,23 @@ class MockBackend(Backend):
     def recommended_selection(self) -> str:
         return "scalar_tournament"
 
+    def version(self) -> str:
+        return "mock_v1"
+
+    def eval_config_hash(self) -> str:
+        return "mock_cfg_hash"
+
+    def format_reflection_prompt(self, population: list[Any], memory: Any, generation: int) -> str:
+        return "Mock reflection prompt"
+
+    def default_operator_weights(self) -> dict[str, float]:
+        return {"mock_append": 0.5, "mock_shuffle": 0.5}
+
+    def format_crossover_prompt(
+        self, parent_a: Individual, parent_b: Individual, context: Any
+    ) -> str:
+        return f"Crossover: {parent_a.genome} + {parent_b.genome}"
+
 
 # ---------------------------------------------------------------------------
 # Constant-fitness backend for stagnation testing

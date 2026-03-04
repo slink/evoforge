@@ -7,6 +7,7 @@ parsing, credit assignment, validation, mutation operators, and evaluation.
 
 from __future__ import annotations
 
+import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -205,10 +206,68 @@ class LeanBackend(Backend):
         """Return the recommended selection strategy for Lean."""
         return "lexicase"
 
+    def version(self) -> str:
+        """Return a version string for cache-keying."""
+        return "lean_v1"
+
+    def eval_config_hash(self) -> str:
+        """Return a SHA-256 hash of the evaluation config, truncated to 16 chars."""
+        content = f"{self.theorem_statement}:{self.project_dir}"
+        return hashlib.sha256(content.encode()).hexdigest()[:16]
+
+    def format_reflection_prompt(
+        self, population: list[Individual], memory: Any, generation: int
+    ) -> str:
+        """Render the reflection prompt template with population statistics."""
+        # Compute population statistics
+        fitnesses = [ind.fitness.primary for ind in population if ind.fitness is not None]
+        best_fitness = max(fitnesses) if fitnesses else 0.0
+        avg_fitness = sum(fitnesses) / len(fitnesses) if fitnesses else 0.0
+
+        # Simple diversity measure: number of unique genomes / population size
+        if population:
+            unique_genomes = len({ind.genome for ind in population})
+            diversity = unique_genomes / len(population)
+        else:
+            diversity = 0.0
+
+        # Top individuals sorted by fitness
+        evaluated = [ind for ind in population if ind.fitness is not None]
+        top_individuals = sorted(
+            evaluated,
+            key=lambda ind: ind.fitness.primary,  # type: ignore[union-attr]
+            reverse=True,
+        )[:5]
+
+        # Memory section
+        memory_section = ""
+        if memory is not None:
+            memory_section = str(memory)
+
+        template = self._jinja_env.get_template("reflection_prompt.j2")
+        return template.render(
+            best_fitness=best_fitness,
+            avg_fitness=round(avg_fitness, 4),
+            pop_size=len(population),
+            generation=generation,
+            diversity=round(diversity, 4),
+            memory_section=memory_section,
+            top_individuals=top_individuals,
+        )
+
+    def default_operator_weights(self) -> dict[str, float]:
+        """Return default mutation-operator weights for Lean tactic proofs."""
+        return {
+            "prefix_truncation": 0.25,
+            "tactic_swap": 0.25,
+            "tactic_reorder": 0.25,
+            "splice_prefixes": 0.25,
+        }
+
     # -- Extra helpers ------------------------------------------------------
 
     def format_crossover_prompt(
-        self, parent_a: Individual, parent_b_genome: str, context: Any
+        self, parent_a: Individual, parent_b: Individual, context: Any
     ) -> str:
         """Render the crossover prompt template for the LLM."""
         diagnostics_a = ""
@@ -222,7 +281,7 @@ class LeanBackend(Backend):
         template = self._jinja_env.get_template("crossover_prompt.j2")
         return template.render(
             genome_a=parent_a.genome,
-            genome_b=parent_b_genome,
+            genome_b=parent_b.genome,
             diagnostics_a=diagnostics_a,
             credit_a=credit_a,
         )
