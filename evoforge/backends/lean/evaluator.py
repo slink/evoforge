@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import pty
 import shutil
+import subprocess
+import termios
 from dataclasses import dataclass, field
 from typing import Any, cast
 
@@ -142,42 +146,84 @@ def _parse_goals(raw_goals: list[str]) -> list[Goal]:
 class LeanREPLProcess:
     """Manages a subprocess for the Lean REPL.
 
-    Communicates via JSON over stdin/stdout.
+    Communicates via JSON over stdin/stdout.  Uses a pty for the child's
+    stdout so the REPL's C runtime stays line-buffered (pipe would cause
+    block-buffering, preventing interactive reads).
     """
 
     def __init__(self, project_dir: str, repl_path: str | None = None) -> None:
         self._project_dir = project_dir
         self._repl_path = repl_path
-        self._process: asyncio.subprocess.Process | None = None
+        self._proc: subprocess.Popen[bytes] | None = None
+        self._reader: asyncio.StreamReader | None = None
+        self._master_fd: int | None = None
 
     async def start(self) -> None:
         """Start the Lean REPL subprocess."""
         repl_bin = self._repl_path or shutil.which("repl") or "repl"
-        self._process = await asyncio.create_subprocess_exec(
-            "lake",
-            "env",
-            repl_bin,
+
+        # Create a pty so the child's stdout is line-buffered.
+        master_fd, slave_fd = pty.openpty()
+        # Disable echo on the pty so our input isn't reflected back.
+        attrs = termios.tcgetattr(master_fd)
+        attrs[3] &= ~termios.ECHO
+        termios.tcsetattr(master_fd, termios.TCSANOW, attrs)
+
+        self._proc = subprocess.Popen(
+            ["lake", "env", repl_bin],
+            stdin=subprocess.PIPE,
+            stdout=slave_fd,
+            stderr=subprocess.PIPE,
             cwd=self._project_dir,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
         )
+        os.close(slave_fd)
+        self._master_fd = master_fd
+
+        # Wrap the master fd in an asyncio StreamReader.
+        loop = asyncio.get_running_loop()
+        reader = asyncio.StreamReader()
+        protocol = asyncio.StreamReaderProtocol(reader)
+        await loop.connect_read_pipe(lambda: protocol, os.fdopen(master_fd, "rb", 0))
+        self._reader = reader
 
     async def send_command(self, cmd: dict[str, object]) -> dict[str, object]:
-        """Send a JSON command to the REPL and read the JSON response."""
-        proc = self._process
-        if proc is None or proc.stdin is None or proc.stdout is None:
+        """Send a JSON command to the REPL and read the JSON response.
+
+        The REPL outputs pretty-printed (multi-line) JSON, so we read lines
+        until the accumulated text forms a valid JSON object.  Commands are
+        separated by blank lines per the REPL protocol.
+        """
+        proc = self._proc
+        reader = self._reader
+        if proc is None or proc.stdin is None or reader is None:
             raise RuntimeError("REPL process not started")
 
-        payload = json.dumps(cmd) + "\n"
+        payload = json.dumps(cmd) + "\n\n"
         proc.stdin.write(payload.encode("utf-8"))
-        await proc.stdin.drain()
+        proc.stdin.flush()
 
-        line = await proc.stdout.readline()
-        if not line:
-            raise RuntimeError("REPL process closed unexpectedly")
+        buf: list[str] = []
+        depth = 0
+        started = False
+        while True:
+            line = await reader.readline()
+            if not line:
+                raise RuntimeError("REPL process closed unexpectedly")
+            text = line.decode("utf-8")
+            # Skip blank lines between responses.
+            if not text.strip() and not started:
+                continue
+            buf.append(text)
+            for ch in text:
+                if ch == "{":
+                    depth += 1
+                    started = True
+                elif ch == "}":
+                    depth -= 1
+            if started and depth == 0:
+                break
 
-        return json.loads(line.decode("utf-8"))  # type: ignore[no-any-return]
+        return json.loads("".join(buf))  # type: ignore[no-any-return]
 
     async def send_tactic(self, tactic: str, state: int = 0) -> dict[str, object]:
         """Send a single tactic command to the REPL."""
@@ -190,17 +236,19 @@ class LeanREPLProcess:
 
     async def close(self) -> None:
         """Terminate the REPL subprocess."""
-        if self._process is not None:
+        if self._proc is not None:
             try:
-                self._process.terminate()
-                await self._process.wait()
+                self._proc.terminate()
+                self._proc.wait()
             except ProcessLookupError:
                 pass
-            self._process = None
+            self._proc = None
+        self._reader = None
+        self._master_fd = None
 
     def is_healthy(self) -> bool:
         """Check if the REPL process is alive."""
-        return self._process is not None and self._process.returncode is None
+        return self._proc is not None and self._proc.returncode is None
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +341,12 @@ class LeanStepwiseEvaluator:
 
             goals_before = list(last_goals)
 
-            if "severity" in resp and resp["severity"] == "error":
+            is_error = ("severity" in resp and resp["severity"] == "error") or (
+                "message" in resp and "proofState" not in resp
+            )
+            if is_error:
                 # Tactic failed
-                error_msg = str(resp.get("message", "unknown error"))
+                error_msg = str(resp.get("message", resp.get("data", "unknown error")))
                 error_type = "tactic_failed"
                 error_message = error_msg
                 stuck_index = i
