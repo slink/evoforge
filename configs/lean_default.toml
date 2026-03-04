@@ -1,6 +1,11 @@
+[run]
+name = "levy_proof_search_001"
+backend = "lean"
+seed = 42
+
 [population]
-size = 50
-elite_k = 5
+size = 30
+elite_k = 2
 
 [selection]
 strategy = "lexicase"
@@ -8,17 +13,22 @@ tournament_size = 3
 epsilon = 0.0
 
 [mutation]
-schedule = "adaptive"
+schedule = "phased"
 llm_weight = 0.6
 cheap_weight = 0.4
 crossover_weight = 0.2
 
 [llm]
-model = "claude-sonnet-4-20250514"
+model = "claude-haiku-4-5-20251001"
+reflection_model = "claude-sonnet-4-5-20250929"
 temperature = 0.7
+temperature_start = 1.0
+temperature_end = 0.3
+temperature_schedule = "linear"
 max_tokens = 4096
 max_calls = 1000
 max_cost_usd = 50.0
+max_attempts = 3
 
 [eval]
 max_concurrent = 4
@@ -32,7 +42,37 @@ project_dir = "/Users/sglink/Desktop/Projects/LeanLevy"
 repl_path = ""
 
 [evolution]
-max_generations = 100
+max_generations = 200
 stagnation_window = 10
 checkpoint_every = 10
 log_level = "INFO"
+
+[reflection]
+interval = 10
+include_top_k = 5
+include_bottom_k = 5
+
+[memory]
+max_patterns = 20
+max_dead_ends = 15
+max_constructs = 30
+stagnation_window = 20
+
+[scheduler]
+mode = "async_batch"
+max_llm_concurrent = 4
+max_eval_concurrent = 8
+max_pending = 16
+llm_budget_per_gen = 15
+
+[diversity]
+strategy = "map_elites"
+sampling = "weighted"
+
+[ablation]
+disable_llm = false
+disable_diagnostics = false
+disable_reflection = false
+disable_memory = false
+disable_cheap_operators = false
+disable_credit = false

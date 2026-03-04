@@ -8,6 +8,14 @@ from pathlib import Path
 from pydantic import BaseModel
 
 
+class RunConfig(BaseModel):
+    """Top-level run identification and seed."""
+
+    name: str = ""
+    backend: str = "lean"
+    seed: int = 42
+
+
 class PopulationConfig(BaseModel):
     """Population sizing and elitism parameters."""
 
@@ -35,11 +43,16 @@ class MutationConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM backend configuration and budget limits."""
 
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-haiku-4-5-20251001"
+    reflection_model: str = "claude-sonnet-4-5-20250929"
     temperature: float = 0.7
+    temperature_start: float = 1.0
+    temperature_end: float = 0.3
+    temperature_schedule: str = "linear"
     max_tokens: int = 4096
     max_calls: int = 1000
     max_cost_usd: float = 50.0
+    max_attempts: int = 3
 
 
 class EvalConfig(BaseModel):
@@ -68,9 +81,55 @@ class EvolutionConfig(BaseModel):
     log_level: str = "INFO"
 
 
+class ReflectionConfig(BaseModel):
+    """Periodic reflection/summarization settings."""
+
+    interval: int = 10
+    include_top_k: int = 5
+    include_bottom_k: int = 5
+
+
+class MemoryConfig(BaseModel):
+    """Pattern and dead-end memory limits."""
+
+    max_patterns: int = 20
+    max_dead_ends: int = 15
+    max_constructs: int = 30
+    stagnation_window: int = 20
+
+
+class SchedulerSettings(BaseModel):
+    """Concurrency and batching settings for the scheduler."""
+
+    mode: str = "async_batch"
+    max_llm_concurrent: int = 4
+    max_eval_concurrent: int = 8
+    max_pending: int = 16
+    llm_budget_per_gen: int = 15
+
+
+class DiversityConfig(BaseModel):
+    """Diversity-maintenance strategy."""
+
+    strategy: str = "map_elites"
+    sampling: str = "weighted"
+
+
+class AblationConfig(BaseModel):
+    """Feature toggles for ablation studies."""
+
+    disable_llm: bool = False
+    disable_diagnostics: bool = False
+    disable_reflection: bool = False
+    disable_memory: bool = False
+    disable_cheap_operators: bool = False
+    disable_credit: bool = False
+
+
 class EvoforgeConfig(BaseModel):
     """Root configuration for an evoforge run."""
 
+    run: RunConfig = RunConfig()
     population: PopulationConfig = PopulationConfig()
     selection: SelectionConfig = SelectionConfig()
     mutation: MutationConfig = MutationConfig()
@@ -78,6 +137,11 @@ class EvoforgeConfig(BaseModel):
     eval: EvalConfig = EvalConfig()
     backend: BackendConfig = BackendConfig()
     evolution: EvolutionConfig = EvolutionConfig()
+    reflection: ReflectionConfig = ReflectionConfig()
+    memory: MemoryConfig = MemoryConfig()
+    scheduler: SchedulerSettings = SchedulerSettings()
+    diversity: DiversityConfig = DiversityConfig()
+    ablation: AblationConfig = AblationConfig()
 
 
 def load_config(path: str | Path) -> EvoforgeConfig:
