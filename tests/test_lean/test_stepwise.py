@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 import pytest
 
 from evoforge.backends.lean.evaluator import (
@@ -410,13 +413,50 @@ class TestPrefixCache:
 
 
 # ---------------------------------------------------------------------------
-# Integration test marker (requires real Lean)
+# Integration test (requires real Lean REPL)
 # ---------------------------------------------------------------------------
+
+_EVOFORGE_ROOT = Path(__file__).resolve().parents[2]
+LEAN_PROJECT_DIR = Path(
+    os.environ.get("LEAN_PROJECT_DIR", str(_EVOFORGE_ROOT.parent / "LeanLevy"))
+)
+REPL_BIN = LEAN_PROJECT_DIR / ".lake" / "packages" / "repl" / ".lake" / "build" / "bin" / "repl"
 
 
 @pytest.mark.lean
 class TestLeanIntegration:
     """These tests require a real Lean installation. Skipped in CI."""
 
-    async def test_real_lean_placeholder(self) -> None:
-        pytest.skip("Requires real Lean toolchain")
+    @pytest.mark.timeout(120)
+    async def test_simple_proof(self) -> None:
+        if not REPL_BIN.exists():
+            pytest.skip(f"REPL binary not found at {REPL_BIN}")
+
+        from evoforge.backends.lean.evaluator import LeanREPLProcess
+
+        repl = LeanREPLProcess(
+            project_dir=str(LEAN_PROJECT_DIR),
+            repl_path=str(REPL_BIN),
+        )
+        try:
+            await repl.start()
+
+            # Set up a theorem with a sorry to get the initial proof state
+            resp = await repl.send_command({"cmd": "theorem test : 1 + 1 = 2 := by sorry"})
+            assert "sorries" in resp, f"Expected sorries in response: {resp}"
+            sorries = resp["sorries"]
+            assert isinstance(sorries, list) and len(sorries) > 0
+            initial_state = sorries[0]["proofState"]  # type: ignore[index]
+            assert initial_state == 0
+
+            # Evaluate a tactic sequence that should close the proof
+            # Use 'decide' (built-in, no Mathlib import needed)
+            evaluator = LeanStepwiseEvaluator(repl)
+            seq = TacticSequence(steps=[TacticStep(tactic="decide", args="", raw="decide")])
+            fitness, diag, _trace = await evaluator.evaluate(seq)
+
+            assert fitness.primary == 1.0
+            assert diag.success is True
+            assert fitness.auxiliary["proof_complete"] == 1.0
+        finally:
+            await repl.close()
