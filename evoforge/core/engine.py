@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +12,7 @@ from evoforge.core.config import EvoforgeConfig
 from evoforge.core.evaluator import AsyncEvaluator, EvaluationCache
 from evoforge.core.identity import IdentityPipeline
 from evoforge.core.memory import SearchMemory
-from evoforge.core.mutation import MutationContext, MutationEnsemble
+from evoforge.core.mutation import MutationContext, MutationEnsemble, MutationOperator
 from evoforge.core.population import PopulationManager
 from evoforge.core.scheduler import ExecutionScheduler, SchedulerConfig
 from evoforge.core.selection import (
@@ -138,6 +139,7 @@ class EvolutionEngine:
         self._total_evaluations = 0
         self._reflected = False
         self._temperature = config.llm.temperature
+        self._temperature_boost: float = 0.0
         self._dedup_count: int = 0
         self._total_offspring_attempted: int = 0
 
@@ -175,14 +177,16 @@ class EvolutionEngine:
                 # Reset per-generation scheduler state
                 self._scheduler.reset_generation()
 
-                # Temperature scheduling
-                self._temperature = self._compute_temperature(
+                # Temperature scheduling (base + decaying boost)
+                base_temp = self._compute_temperature(
                     generation=gen,
                     max_generations=max_gen,
                     start=self.config.llm.temperature_start,
                     end=self.config.llm.temperature_end,
                     schedule=self.config.llm.temperature_schedule,
                 )
+                self._temperature = base_temp + self._temperature_boost
+                self._temperature_boost *= 0.8  # decay each generation
 
                 # Check stopping conditions
                 if self._scheduler.should_stop():
@@ -198,9 +202,10 @@ class EvolutionEngine:
                 k = min(self.config.population.size, len(pop_list))
                 parents = self._strategy.select(pop_list, k)
 
-                # Mutate
-                offspring_genomes: list[tuple[str, str]] = []  # (genome, parent_hash)
+                # Mutate (concurrently)
+                offspring_genomes: list[tuple[str, str, str]] = []
                 guidance = self._memory.prompt_section(max_tokens=200)
+                tasks: list[asyncio.Task[tuple[str, str, str] | None]] = []
                 for parent in parents:
                     operator = self._ensemble.select_operator()
 
@@ -216,22 +221,18 @@ class EvolutionEngine:
                         backend=self.backend,
                         credits=parent.credits,
                     )
-                    try:
-                        new_genome = await operator.apply(parent, context)
-                        if operator.cost == "llm":
-                            self._scheduler.record_gen_llm_call()
-                        offspring_genomes.append((new_genome, parent.ir_hash))
-                    except Exception:
-                        logger.debug(
-                            "Mutation failed for operator %s", operator.name, exc_info=True
-                        )
+                    tasks.append(asyncio.create_task(self._mutate_one(parent, operator, context)))
+                results = await asyncio.gather(*tasks)
+                for r in results:
+                    if r is not None:
+                        offspring_genomes.append(r)
 
                 # Identity pipeline + dedup
                 known_hashes = {ind.ir_hash for ind in pop_list}
                 offspring_individuals: list[Individual] = []
-                offspring_lineage: list[tuple[str, str]] = []  # (parent_hash, child_hash)
+                offspring_lineage: list[tuple[str, str, str]] = []
 
-                for genome, parent_hash in offspring_genomes:
+                for genome, parent_hash, op_name in offspring_genomes:
                     ind = self._identity.process(genome)
                     if ind is None:
                         continue
@@ -243,7 +244,7 @@ class EvolutionEngine:
                         continue
                     known_hashes.add(ind.ir_hash)
                     offspring_individuals.append(ind)
-                    offspring_lineage.append((parent_hash, ind.ir_hash))
+                    offspring_lineage.append((parent_hash, ind.ir_hash, op_name))
 
                 if not offspring_individuals:
                     logger.debug("No novel offspring in generation %d", gen)
@@ -285,11 +286,11 @@ class EvolutionEngine:
                 for ind in credited_offspring:
                     await self.archive.store(ind)
 
-                for parent_hash, child_hash in offspring_lineage:
+                for parent_hash, child_hash, op_name in offspring_lineage:
                     await self.archive.store_lineage(
                         parent_hash=parent_hash,
                         child_hash=child_hash,
-                        operator_name="mutation",
+                        operator_name=op_name,
                         generation=gen,
                     )
 
@@ -351,6 +352,30 @@ class EvolutionEngine:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _mutate_one(
+        self,
+        parent: Individual,
+        operator: MutationOperator,
+        context: MutationContext,
+    ) -> tuple[str, str, str] | None:
+        """Apply a single mutation, returning (genome, parent_hash, op_name) or None."""
+        try:
+            if operator.cost == "llm":
+                async with self._scheduler.acquire_llm():
+                    if not self._scheduler.can_use_llm():
+                        # Budget exhausted while waiting — fall back to cheap
+                        op = self._ensemble.cheapest_operator()
+                        new_genome = await op.apply(parent, context)
+                        return (new_genome, parent.ir_hash, op.name)
+                    self._scheduler.record_gen_llm_call()
+                    new_genome = await operator.apply(parent, context)
+            else:
+                new_genome = await operator.apply(parent, context)
+            return (new_genome, parent.ir_hash, operator.name)
+        except Exception:
+            logger.debug("Mutation failed for operator %s", operator.name, exc_info=True)
+            return None
 
     def _process_genomes(self, genomes: list[str], generation: int) -> list[Individual]:
         """Process raw genomes through the identity pipeline."""
@@ -416,8 +441,14 @@ class EvolutionEngine:
             generation,
         )
         self._reflected = True
-        max_temp = self.config.llm.temperature_start + 0.3
-        self._temperature = min(self._temperature + 0.2, max_temp)
+        max_boost = 0.3
+        old_boost = self._temperature_boost
+        self._temperature_boost = min(self._temperature_boost + 0.2, max_boost)
+        # Apply the increment to the current generation's temperature for reflection
+        increment = self._temperature_boost - old_boost
+        self._temperature = min(
+            self._temperature + increment, self.config.llm.temperature_start + max_boost
+        )
         if self.llm_client is not None and not self.config.ablation.disable_reflection:
             await self._reflect(generation)
 
@@ -463,6 +494,7 @@ class EvolutionEngine:
                 else 0.0
             ),
             "stagnation_counter": float(self._trailing_stagnation()),
+            "temperature_boost": self._temperature_boost,
         }
 
         return ExperimentResult(

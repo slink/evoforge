@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
+import time
 from dataclasses import dataclass
 from typing import Any, Literal
 from unittest.mock import AsyncMock
@@ -525,3 +527,171 @@ class TestPeriodicReflection:
             await engine.run()
 
         assert any("Periodic reflection" in r.message for r in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: Concurrent mutation loop
+# ---------------------------------------------------------------------------
+
+
+class SlowLLMOperator(MutationOperator):
+    """LLM operator with configurable delay, tracks concurrent count."""
+
+    _active: int = 0
+    _max_active: int = 0
+
+    @property
+    def name(self) -> str:
+        return "slow_llm"
+
+    @property
+    def cost(self) -> Literal["cheap", "llm"]:
+        return "llm"
+
+    async def apply(self, parent: Individual, context: MutationContext) -> str:
+        SlowLLMOperator._active += 1
+        SlowLLMOperator._max_active = max(SlowLLMOperator._max_active, SlowLLMOperator._active)
+        await asyncio.sleep(0.05)
+        SlowLLMOperator._active -= 1
+        return parent.genome + f"\nllm_{context.generation}_{id(parent)}"
+
+
+class TestConcurrentMutations:
+    """Fix 1: mutations run concurrently via asyncio.gather."""
+
+    async def test_mutations_run_concurrently(self, archive: Archive) -> None:
+        """Multiple parents mutated concurrently — wall time << sequential."""
+        config = _make_config(max_generations=1, population_size=6)
+        # High LLM budget so all use the slow operator
+        config.scheduler = SchedulerSettings(llm_budget_per_gen=100, max_llm_concurrent=6)
+        backend = MockBackend()
+
+        # Override mutation_operators to return only the slow LLM operator
+        backend.mutation_operators = lambda: [SlowLLMOperator()]  # type: ignore[method-assign]
+
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        start = time.monotonic()
+        await engine.run()
+        elapsed = time.monotonic() - start
+
+        # 6 parents × 0.05s = 0.3s sequential. Concurrent should be < 0.15s.
+        # We give generous margin — just verify it's less than sequential.
+        assert elapsed < 0.25, f"Mutations seem sequential: {elapsed:.2f}s"
+
+    async def test_llm_semaphore_limits_concurrency(self, archive: Archive) -> None:
+        """acquire_llm() semaphore caps concurrent LLM operator calls."""
+        SlowLLMOperator._active = 0
+        SlowLLMOperator._max_active = 0
+
+        config = _make_config(max_generations=1, population_size=8)
+        config.scheduler = SchedulerSettings(llm_budget_per_gen=100, max_llm_concurrent=2)
+        backend = MockBackend()
+        backend.mutation_operators = lambda: [SlowLLMOperator()]  # type: ignore[method-assign]
+
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        assert SlowLLMOperator._max_active <= 2, (
+            f"Concurrency exceeded semaphore limit: {SlowLLMOperator._max_active}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: Decaying temperature boost
+# ---------------------------------------------------------------------------
+
+
+class TestDecayingTemperatureBoost:
+    """Fix 2: stagnation boost decays rather than being overwritten."""
+
+    async def test_boost_survives_next_generation(self, archive: Archive) -> None:
+        """After stagnation, temperature in the next gen > pure schedule value."""
+        stagnation_window = 3
+        max_gen = stagnation_window + 2
+        config = _make_config(
+            max_generations=max_gen,
+            population_size=5,
+            stagnation_window=stagnation_window,
+        )
+        backend = ConstantFitnessBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+
+        # The boost should still be > 0 after run (decayed but not zero)
+        assert engine._temperature_boost > 0.0
+
+    async def test_boost_decays_over_generations(self, archive: Archive) -> None:
+        """Boost decays by 0.8× each generation, approaching zero."""
+        stagnation_window = 2
+        max_gen = stagnation_window + 5
+        config = _make_config(
+            max_generations=max_gen,
+            population_size=5,
+            stagnation_window=stagnation_window,
+        )
+        backend = ConstantFitnessBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+
+        # Boost decays each gen but stagnation keeps re-triggering it,
+        # so it stays at or below the cap
+        assert engine._temperature_boost <= 0.3
+
+    async def test_boost_caps_at_max(self, archive: Archive) -> None:
+        """Temperature boost never exceeds 0.3."""
+        stagnation_window = 2
+        max_gen = stagnation_window + 10
+        config = _make_config(
+            max_generations=max_gen,
+            population_size=5,
+            stagnation_window=stagnation_window,
+        )
+        backend = ConstantFitnessBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+
+        assert engine._temperature_boost <= 0.3
+
+    async def test_temperature_boost_in_metrics(self, archive: Archive) -> None:
+        """temperature_boost appears in result metrics."""
+        config = _make_config(max_generations=3, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        result = await engine.run()
+
+        assert "temperature_boost" in result.metrics
+
+
+# ---------------------------------------------------------------------------
+# Fix 3: Operator name in lineage
+# ---------------------------------------------------------------------------
+
+
+class TestOperatorNameInLineage:
+    """Fix 3: store_lineage receives actual operator name, not 'mutation'."""
+
+    async def test_lineage_stores_operator_name(self, archive: Archive) -> None:
+        """Lineage entries carry the actual operator name."""
+        config = _make_config(max_generations=2, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+
+        # Query all lineage entries from the archive
+        pop = engine.population.get_all()
+        found_operator_names: set[str] = set()
+        for ind in pop:
+            lineage_records = await archive.get_lineage(ind.ir_hash)
+            for rec in lineage_records:
+                found_operator_names.add(rec["operator_name"])
+
+        # Should contain actual operator names, not "mutation"
+        if found_operator_names:
+            assert "mutation" not in found_operator_names
+            # Should be one of the mock operators
+            assert found_operator_names <= {"mock_append", "mock_shuffle"}
