@@ -327,6 +327,17 @@ class TestStagnationReflection:
         assert result.reflected is True
 
 
+class TestEngineUsesBackendVersion:
+    """Engine wires backend.version() and eval_config_hash() into the evaluator."""
+
+    async def test_evaluator_uses_backend_version(self, archive: Archive) -> None:
+        config = _make_config(max_generations=1, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        assert engine._evaluator._backend_version == "mock_v1"
+        assert engine._evaluator._config_hash == "mock_cfg_hash"
+
+
 class TestBestIndividualTracked:
     """After run, result.best_individual is not None."""
 

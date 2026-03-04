@@ -82,8 +82,8 @@ class EvolutionEngine:
         self._evaluator = AsyncEvaluator(
             backend=backend,
             archive=archive,
-            backend_version="mock_v1",
-            config_hash="cfg_test",
+            backend_version=backend.version(),
+            config_hash=backend.eval_config_hash(),
             max_concurrent=config.eval.max_concurrent,
             timeout_seconds=config.eval.timeout_seconds,
         )
