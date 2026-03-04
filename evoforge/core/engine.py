@@ -270,6 +270,32 @@ class EvolutionEngine:
         return self._build_result(generations_run=min(max_gen, gen if max_gen > 0 else 0))
 
     # ------------------------------------------------------------------
+    # Temperature scheduling
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _compute_temperature(
+        generation: int,
+        max_generations: int,
+        start: float,
+        end: float,
+        schedule: str,
+    ) -> float:
+        """Compute the LLM temperature for a given generation.
+
+        Supports two schedules:
+        - "linear": linearly interpolates from *start* to *end* over
+          *max_generations*, clamping at *end* for generations beyond max.
+        - "fixed": always returns *start* regardless of generation.
+
+        Returns *start* when *max_generations* <= 0 (avoids division by zero).
+        """
+        if schedule == "fixed" or max_generations <= 0:
+            return start
+        t = min(generation / max_generations, 1.0)
+        return start + (end - start) * t
+
+    # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
