@@ -48,6 +48,7 @@ class SchedulerConfig:
     max_llm_calls: int = 1000
     max_cost_usd: float = 50.0
     eval_timeout_seconds: float = 60.0
+    llm_budget_per_gen: int = 15
 
 
 class ExecutionScheduler:
@@ -62,6 +63,7 @@ class ExecutionScheduler:
         self._eval_semaphore = asyncio.Semaphore(config.max_concurrent_evals)
         self._llm_semaphore = asyncio.Semaphore(config.max_concurrent_llm)
         self._tracker = CostTracker()
+        self._gen_llm_calls: int = 0
 
     @asynccontextmanager
     async def acquire_eval(self) -> AsyncIterator[None]:
@@ -81,6 +83,23 @@ class ExecutionScheduler:
             self._tracker.llm_calls >= self._config.max_llm_calls
             or self._tracker.estimated_cost_usd >= self._config.max_cost_usd
         )
+
+    @property
+    def gen_llm_calls(self) -> int:
+        """Return the number of LLM calls made in the current generation."""
+        return self._gen_llm_calls
+
+    def can_use_llm(self) -> bool:
+        """Return True if the per-generation LLM budget has not been exhausted."""
+        return self._gen_llm_calls < self._config.llm_budget_per_gen
+
+    def record_gen_llm_call(self) -> None:
+        """Record an LLM call against the per-generation budget."""
+        self._gen_llm_calls += 1
+
+    def reset_generation(self) -> None:
+        """Reset per-generation counters for a new generation."""
+        self._gen_llm_calls = 0
 
     @property
     def tracker(self) -> CostTracker:
