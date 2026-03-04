@@ -61,8 +61,9 @@ class LLMMutate(MutationOperator):
 class LLMCrossover(MutationOperator):
     """Crossover operator that asks an LLM to combine two parent genomes.
 
-    The second parent's genome is expected in ``context.guidance``.  When
-    no guidance is available the operator falls back to a standard mutation.
+    The second parent is expected in ``context.guidance_individual``.  When
+    no guidance individual is available the operator falls back to a standard
+    mutation prompt.
     """
 
     def __init__(self, client: Any, model: str, max_tokens: int = 4096) -> None:
@@ -80,11 +81,12 @@ class LLMCrossover(MutationOperator):
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
         """Produce a child genome by combining two parents via LLM."""
-        if not context.guidance:
-            # No second parent available — fall back to mutation prompt
-            prompt = context.backend.format_mutation_prompt(parent, context)
+        if context.guidance_individual is not None:
+            prompt = context.backend.format_crossover_prompt(
+                parent, context.guidance_individual, context
+            )
         else:
-            prompt = context.backend.format_crossover_prompt(parent, context)
+            prompt = context.backend.format_mutation_prompt(parent, context)
 
         system = context.backend.system_prompt()
 
@@ -100,5 +102,5 @@ class LLMCrossover(MutationOperator):
         if genome is not None:
             return genome
 
-        logger.warning("LLMCrossover: genome extraction failed, falling back to parent")
+        logger.warning("LLMCrossover: extraction failed, falling back to parent")
         return parent.genome
