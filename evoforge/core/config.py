@@ -83,7 +83,7 @@ class EvolutionConfig(BaseModel):
 
 
 class ReflectionConfig(BaseModel):
-    """Periodic reflection/summarization settings.  # TODO: not yet wired into engine"""
+    """Periodic reflection/summarization settings."""
 
     interval: int = 10
     include_top_k: int = 5
@@ -91,7 +91,7 @@ class ReflectionConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
-    """Pattern and dead-end memory limits.  # TODO: not yet wired into engine"""
+    """Pattern and dead-end memory limits."""
 
     max_patterns: int = 20
     max_dead_ends: int = 15
@@ -99,7 +99,7 @@ class MemoryConfig(BaseModel):
 
 
 class SchedulerSettings(BaseModel):
-    """Concurrency and batching settings for the scheduler.  # TODO: not yet wired into engine"""
+    """Concurrency and batching settings for the scheduler."""
 
     mode: Literal["async_batch"] = "async_batch"
     max_llm_concurrent: int = 4
@@ -109,14 +109,14 @@ class SchedulerSettings(BaseModel):
 
 
 class DiversityConfig(BaseModel):
-    """Diversity-maintenance strategy.  # TODO: not yet wired into engine"""
+    """Diversity-maintenance strategy."""
 
     strategy: Literal["map_elites"] = "map_elites"
     sampling: Literal["weighted"] = "weighted"
 
 
 class AblationConfig(BaseModel):
-    """Feature toggles for ablation studies.  # TODO: not yet wired into engine"""
+    """Feature toggles for ablation studies."""
 
     disable_llm: bool = False
     disable_diagnostics: bool = False

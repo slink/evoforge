@@ -27,10 +27,12 @@ class SearchMemory:
         max_patterns: int = 50,
         max_failures: int = 50,
         stagnation_window: int = 10,
+        max_dead_ends: int = 50,
     ) -> None:
         self.max_patterns = max_patterns
         self.max_failures = max_failures
         self.stagnation_window = stagnation_window
+        self.max_dead_ends = max_dead_ends
 
         self.patterns: list[Pattern] = []
         self.failures: list[FailureMode] = []
@@ -203,10 +205,22 @@ class SearchMemory:
         self.failures = all_failures[: self.max_failures]
 
     def _detect_dead_ends(self) -> None:
-        """Mark tactic descriptions that have failed >= _DEAD_END_COUNT times."""
+        """Mark tactic descriptions that have failed >= _DEAD_END_COUNT times.
+
+        Caps the dead_ends set at max_dead_ends, keeping the most frequent.
+        """
         for desc, accum in self._failure_data.items():
             if accum.count >= _DEAD_END_COUNT:
                 self.dead_ends.add(desc)
+
+        if len(self.dead_ends) > self.max_dead_ends:
+            # Keep the most frequent dead ends
+            ranked = sorted(
+                self.dead_ends,
+                key=lambda d: self._failure_data.get(d, _FailureAccum(0, 0)).count,
+                reverse=True,
+            )
+            self.dead_ends = set(ranked[: self.max_dead_ends])
 
 
 class _PatternAccum:

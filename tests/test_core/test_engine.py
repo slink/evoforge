@@ -6,15 +6,19 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from typing import Any, Literal
+from unittest.mock import AsyncMock
 
 import pytest
 
 from evoforge.backends.base import Backend
 from evoforge.core.archive import Archive
 from evoforge.core.config import (
+    AblationConfig,
     EvoforgeConfig,
     EvolutionConfig,
     PopulationConfig,
+    ReflectionConfig,
+    SchedulerSettings,
     SelectionConfig,
 )
 from evoforge.core.engine import EvolutionEngine, ExperimentResult
@@ -117,7 +121,9 @@ class MockBackend(Backend):
         trace = {"steps": mock_ir.lines}
         return fitness, diagnostics, trace
 
-    def evaluate_stepwise(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
+    async def evaluate_stepwise(
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
         raise NotImplementedError
 
     def assign_credit(
@@ -387,3 +393,135 @@ class TestExperimentResultMetrics:
     async def test_result_cost_dict_present(self, archive: Archive) -> None:
         result = await self._run_engine(archive)
         assert isinstance(result.cost, dict)
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle tests: startup/shutdown
+# ---------------------------------------------------------------------------
+
+
+class TestEngineLifecycle:
+    """Engine calls backend.startup() before evaluation and shutdown() after."""
+
+    @staticmethod
+    def _make_lifecycle_backend() -> MockBackend:
+        backend = MockBackend()
+        backend.startup = AsyncMock()  # type: ignore[method-assign]
+        backend.shutdown = AsyncMock()  # type: ignore[method-assign]
+        return backend
+
+    async def test_startup_called_before_eval(self, archive: Archive) -> None:
+        backend = self._make_lifecycle_backend()
+        config = _make_config(max_generations=1, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+        backend.startup.assert_awaited_once()
+
+    async def test_shutdown_called_after_run(self, archive: Archive) -> None:
+        backend = self._make_lifecycle_backend()
+        config = _make_config(max_generations=1, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+        backend.shutdown.assert_awaited_once()
+
+    async def test_shutdown_called_on_error(self, archive: Archive) -> None:
+        backend = self._make_lifecycle_backend()
+
+        async def _raise_eval(ir: Any, seed: Any = None) -> Any:
+            raise RuntimeError("boom")
+
+        backend.evaluate = _raise_eval  # type: ignore[method-assign]
+        config = _make_config(max_generations=1, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        with pytest.raises(RuntimeError, match="boom"):
+            await engine.run()
+        backend.shutdown.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Ablation tests
+# ---------------------------------------------------------------------------
+
+
+class TestAblationFlags:
+    """Ablation config flags disable specific engine components."""
+
+    async def test_disable_llm_skips_llm_operators(self, archive: Archive) -> None:
+        """With disable_llm=True, no LLM operators in ensemble."""
+        config = _make_config(max_generations=1, population_size=5)
+        config.ablation = AblationConfig(disable_llm=True)
+        backend = MockBackend()
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=object()
+        )
+
+        # All operators should be cheap
+        for op in engine._ensemble._operators:
+            assert op.cost == "cheap"
+
+    async def test_disable_credit_skips_assignment(self, archive: Archive) -> None:
+        """With disable_credit=True, individuals get no credits assigned."""
+        config = _make_config(max_generations=1, population_size=5)
+        config.ablation = AblationConfig(disable_credit=True)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+        # Credits should be empty (default) for individuals
+        pop = engine.population.get_all()
+        for ind in pop:
+            assert ind.credits == []
+
+
+# ---------------------------------------------------------------------------
+# Per-gen LLM budget
+# ---------------------------------------------------------------------------
+
+
+class TestPerGenLLMBudget:
+    """Scheduler resets per-generation LLM budget each generation."""
+
+    async def test_scheduler_resets_each_gen(self, archive: Archive) -> None:
+        config = _make_config(max_generations=2, population_size=5)
+        config.scheduler = SchedulerSettings(llm_budget_per_gen=0)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        await engine.run()
+
+        # With budget=0, LLM ops always fall back to cheap — engine still runs
+        assert engine._scheduler.gen_llm_calls == 0
+
+
+# ---------------------------------------------------------------------------
+# Periodic reflection
+# ---------------------------------------------------------------------------
+
+
+class _FakeLLMResponse:
+    text: str = "reflection output"
+
+
+class _FakeLLMClient:
+    async def async_generate(self, *args: Any, **kwargs: Any) -> _FakeLLMResponse:
+        return _FakeLLMResponse()
+
+
+class TestPeriodicReflection:
+    """Periodic reflection triggers at the configured interval."""
+
+    async def test_periodic_reflection_at_interval(
+        self, archive: Archive, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        config = _make_config(max_generations=10, population_size=5)
+        config.reflection = ReflectionConfig(interval=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=_FakeLLMClient()
+        )
+
+        with caplog.at_level(logging.INFO):
+            await engine.run()
+
+        assert any("Periodic reflection" in r.message for r in caplog.records)

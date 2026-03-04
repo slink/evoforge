@@ -7,8 +7,10 @@ parsing, credit assignment, validation, mutation operators, and evaluation.
 
 from __future__ import annotations
 
+import asyncio
 import functools
 import hashlib
+import logging
 import re
 from pathlib import Path
 from typing import Any
@@ -56,6 +58,9 @@ _LEAN_CODE_BLOCK_RE = re.compile(r"```lean\s*\n(.*?)```", re.DOTALL)
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
+logger = logging.getLogger(__name__)
+
+
 class LeanBackend(Backend):
     """Concrete backend for Lean 4 theorem proving.
 
@@ -74,6 +79,8 @@ class LeanBackend(Backend):
         self._evaluator: LeanStepwiseEvaluator | None = None
         self._repl: LeanREPLProcess | None = None
         self.repl_path = repl_path
+        self._repl_lock = asyncio.Lock()
+        self._prefix_cache: dict[str, int] = {}
 
         self._jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -86,23 +93,41 @@ class LeanBackend(Backend):
         """Parse a raw genome string into a :class:`TacticSequence`."""
         return parse_tactic_sequence(genome)
 
-    def evaluate(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
-        """Synchronous evaluation is not supported for Lean.
+    async def startup(self) -> None:
+        """Start the Lean REPL and initialize the stepwise evaluator."""
+        self._repl = LeanREPLProcess(self.project_dir, self.repl_path)
+        await self._repl.start()
 
-        Lean evaluation requires the async REPL. Use
-        :class:`LeanStepwiseEvaluator` directly for async stepwise evaluation.
-        """
-        raise NotImplementedError("Use evaluate_stepwise for Lean backend")
+        # Send theorem initialization to verify the REPL is working
+        init_cmd: dict[str, object] = {"cmd": f"{self.theorem_statement} := by\n sorry"}
+        resp = await self._repl.send_command(init_cmd)
+        if "sorries" not in resp:
+            logger.warning("REPL init response missing 'sorries': %s", resp)
 
-    def evaluate_stepwise(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
-        """Stepwise evaluation requires async.
+        self._evaluator = LeanStepwiseEvaluator(self._repl, prefix_cache=self._prefix_cache)
+        logger.info("Lean REPL started and evaluator initialized")
 
-        Use :class:`LeanStepwiseEvaluator` directly for async stepwise
-        evaluation against the Lean REPL.
-        """
-        raise NotImplementedError(
-            "Lean stepwise evaluation requires async — use LeanStepwiseEvaluator directly"
-        )
+    async def shutdown(self) -> None:
+        """Close the Lean REPL process."""
+        if self._repl is not None:
+            await self._repl.close()
+            self._repl = None
+        self._evaluator = None
+        logger.info("Lean REPL shut down")
+
+    async def evaluate(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
+        """Evaluate a tactic sequence via the stepwise evaluator."""
+        if self._evaluator is None:
+            raise RuntimeError("LeanBackend.startup() must be called before evaluate()")
+        async with self._repl_lock:
+            fitness, diagnostics, trace = await self._evaluator.evaluate(ir)
+        return fitness, diagnostics, trace
+
+    async def evaluate_stepwise(
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
+        """Alias for evaluate() — all Lean evaluation is stepwise."""
+        return await self.evaluate(ir, seed=seed)
 
     def assign_credit(
         self, ir: Any, fitness: Fitness, diagnostics: Any, trace: Any

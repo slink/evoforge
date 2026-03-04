@@ -90,34 +90,42 @@ class EvolutionEngine:
         )
         self._memory = SearchMemory(
             stagnation_window=config.evolution.stagnation_window,
+            max_patterns=config.memory.max_patterns,
+            max_dead_ends=config.memory.max_dead_ends,
         )
         self._scheduler = ExecutionScheduler(
             SchedulerConfig(
                 max_concurrent_evals=config.eval.max_concurrent,
+                max_concurrent_llm=config.scheduler.max_llm_concurrent,
                 max_llm_calls=config.llm.max_calls,
                 max_cost_usd=config.llm.max_cost_usd,
                 eval_timeout_seconds=config.eval.timeout_seconds,
+                llm_budget_per_gen=config.scheduler.llm_budget_per_gen,
             )
         )
 
-        # Build mutation ensemble from backend (cheap) operators only when no LLM
-        cheap_ops = backend.mutation_operators()
-        all_ops = list(cheap_ops)
-        # If LLM client is available, add LLM operators
-        if llm_client is not None:
+        # Build mutation ensemble respecting ablation flags
+        all_ops: list[Any] = []
+        if not config.ablation.disable_cheap_operators:
+            all_ops.extend(backend.mutation_operators())
+        if llm_client is not None and not config.ablation.disable_llm:
             from evoforge.llm.operators import LLMCrossover, LLMMutate
 
             all_ops.append(LLMMutate(llm_client, config.llm.model, config.llm.max_tokens))
             all_ops.append(LLMCrossover(llm_client, config.llm.model, config.llm.max_tokens))
+
+        # Fallback: if ablation disabled everything, use cheap ops anyway
+        if not all_ops:
+            all_ops.extend(backend.mutation_operators())
 
         self._ensemble = MutationEnsemble(
             operators=all_ops,
             schedule=config.mutation.schedule,
         )
 
-        # Generator (only if LLM client provided)
+        # Generator (only if LLM client provided and LLM not ablated)
         self._generator = None
-        if llm_client is not None:
+        if llm_client is not None and not config.ablation.disable_llm:
             from evoforge.core.generator import ValidatedGenerator
 
             self._generator = ValidatedGenerator(
@@ -136,150 +144,181 @@ class EvolutionEngine:
     async def run(self) -> ExperimentResult:
         """Execute the full evolutionary loop and return results."""
         max_gen = self.config.evolution.max_generations
+        ablation = self.config.ablation
 
-        # --- Generation 0: Seed ---
-        logger.info("Seeding population with %d individuals", self.config.population.size)
-        seed_genomes = self.backend.seed_population(self.config.population.size)
+        await self.backend.startup()
+        gen = 0
+        try:
+            # --- Generation 0: Seed ---
+            logger.info("Seeding population with %d individuals", self.config.population.size)
+            seed_genomes = self.backend.seed_population(self.config.population.size)
 
-        seed_individuals = self._process_genomes(seed_genomes, generation=0)
-        if not seed_individuals:
-            logger.warning("No valid seed individuals produced; aborting")
-            return self._build_result(generations_run=0)
+            seed_individuals = self._process_genomes(seed_genomes, generation=0)
+            if not seed_individuals:
+                logger.warning("No valid seed individuals produced; aborting")
+                return self._build_result(generations_run=0)
 
-        evaluated_seeds = await self._evaluator.evaluate_batch(seed_individuals)
-        self._total_evaluations += len(evaluated_seeds)
+            evaluated_seeds = await self._evaluator.evaluate_batch(seed_individuals)
+            self._total_evaluations += len(evaluated_seeds)
 
-        credited_seeds = self._assign_credits(evaluated_seeds)
-        self._add_to_population(credited_seeds)
-
-        logger.info(
-            "Generation 0: pop_size=%d, best_fitness=%.4f",
-            self.population.size,
-            self._best_fitness(),
-        )
-
-        # --- Subsequent generations ---
-        for gen in range(1, max_gen + 1):
-            # Temperature scheduling
-            self._temperature = self._compute_temperature(
-                generation=gen,
-                max_generations=max_gen,
-                start=self.config.llm.temperature_start,
-                end=self.config.llm.temperature_end,
-                schedule=self.config.llm.temperature_schedule,
-            )
-
-            # Check stopping conditions
-            if self._scheduler.should_stop():
-                logger.info("Budget exhausted at generation %d", gen)
-                break
-
-            pop_list = self.population.get_all()
-            if not pop_list:
-                logger.warning("Population empty at generation %d; stopping", gen)
-                break
-
-            # Select parents
-            k = min(self.config.population.size, len(pop_list))
-            parents = self._strategy.select(pop_list, k)
-
-            # Mutate
-            offspring_genomes: list[tuple[str, str]] = []  # (genome, parent_hash)
-            for parent in parents:
-                operator = self._ensemble.select_operator()
-                context = MutationContext(
-                    generation=gen,
-                    memory=self._memory,
-                    guidance=self._memory.prompt_section(max_tokens=200),
-                    temperature=self._temperature,
-                    backend=self.backend,
-                    credits=parent.credits,
-                )
-                try:
-                    new_genome = await operator.apply(parent, context)
-                    offspring_genomes.append((new_genome, parent.ir_hash))
-                except Exception:
-                    logger.debug("Mutation failed for operator %s", operator.name, exc_info=True)
-
-            # Identity pipeline + dedup
-            known_hashes = {ind.ir_hash for ind in pop_list}
-            offspring_individuals: list[Individual] = []
-            offspring_lineage: list[tuple[str, str]] = []  # (parent_hash, child_hash)
-
-            for genome, parent_hash in offspring_genomes:
-                ind = self._identity.process(genome)
-                if ind is None:
-                    continue
-                # Set generation
-                ind.generation = gen
-                self._total_offspring_attempted += 1
-                if self._identity.is_duplicate(ind.ir_hash, known_hashes):
-                    self._dedup_count += 1
-                    continue
-                known_hashes.add(ind.ir_hash)
-                offspring_individuals.append(ind)
-                offspring_lineage.append((parent_hash, ind.ir_hash))
-
-            if not offspring_individuals:
-                logger.debug("No novel offspring in generation %d", gen)
-                self._memory.update([], gen)
-                await self._check_stagnation(gen)
-                continue
-
-            # Evaluate offspring
-            evaluated_offspring = await self._evaluator.evaluate_batch(offspring_individuals)
-            self._total_evaluations += len(evaluated_offspring)
-
-            # Credit assignment
-            credited_offspring = self._assign_credits(evaluated_offspring)
-
-            # Assign behavior descriptors
-            for ind in credited_offspring:
-                if ind.ir is not None:
-                    try:
-                        ind.behavior_descriptor = self.backend.behavior_descriptor(
-                            ind.ir, ind.diagnostics
-                        )
-                    except Exception:
-                        pass
-
-            # Survive
-            pop_list = self.population.get_all()
-            survivors = self._strategy.survive(
-                pop_list, credited_offspring, self.config.population.elite_k
-            )
-
-            # Rebuild population from survivors
-            self.population = PopulationManager(max_size=self.config.population.size)
-            for ind in survivors:
-                self.population.add(ind)
-
-            # Archive offspring and lineage
-            for ind in credited_offspring:
-                await self.archive.store(ind)
-
-            for parent_hash, child_hash in offspring_lineage:
-                await self.archive.store_lineage(
-                    parent_hash=parent_hash,
-                    child_hash=child_hash,
-                    operator_name="mutation",
-                    generation=gen,
-                )
-
-            # Memory update
-            self._memory.update(credited_offspring, gen)
-
-            # Stagnation check
-            await self._check_stagnation(gen)
+            credited_seeds = self._assign_credits(evaluated_seeds)
+            self._add_to_population(credited_seeds)
 
             logger.info(
-                "Generation %d: pop_size=%d, best_fitness=%.4f, diversity=%.4f, evals=%d",
-                gen,
+                "Generation 0: pop_size=%d, best_fitness=%.4f",
                 self.population.size,
                 self._best_fitness(),
-                self.population.diversity_entropy(),
-                self._total_evaluations,
             )
+
+            # --- Subsequent generations ---
+            for gen in range(1, max_gen + 1):
+                # Reset per-generation scheduler state
+                self._scheduler.reset_generation()
+
+                # Temperature scheduling
+                self._temperature = self._compute_temperature(
+                    generation=gen,
+                    max_generations=max_gen,
+                    start=self.config.llm.temperature_start,
+                    end=self.config.llm.temperature_end,
+                    schedule=self.config.llm.temperature_schedule,
+                )
+
+                # Check stopping conditions
+                if self._scheduler.should_stop():
+                    logger.info("Budget exhausted at generation %d", gen)
+                    break
+
+                pop_list = self.population.get_all()
+                if not pop_list:
+                    logger.warning("Population empty at generation %d; stopping", gen)
+                    break
+
+                # Select parents
+                k = min(self.config.population.size, len(pop_list))
+                parents = self._strategy.select(pop_list, k)
+
+                # Mutate
+                offspring_genomes: list[tuple[str, str]] = []  # (genome, parent_hash)
+                guidance = self._memory.prompt_section(max_tokens=200)
+                for parent in parents:
+                    operator = self._ensemble.select_operator()
+
+                    # Skip LLM operators when per-gen budget exhausted
+                    if operator.cost == "llm" and not self._scheduler.can_use_llm():
+                        operator = self._ensemble.cheapest_operator()
+
+                    context = MutationContext(
+                        generation=gen,
+                        memory=self._memory,
+                        guidance=guidance,
+                        temperature=self._temperature,
+                        backend=self.backend,
+                        credits=parent.credits,
+                    )
+                    try:
+                        new_genome = await operator.apply(parent, context)
+                        if operator.cost == "llm":
+                            self._scheduler.record_gen_llm_call()
+                        offspring_genomes.append((new_genome, parent.ir_hash))
+                    except Exception:
+                        logger.debug(
+                            "Mutation failed for operator %s", operator.name, exc_info=True
+                        )
+
+                # Identity pipeline + dedup
+                known_hashes = {ind.ir_hash for ind in pop_list}
+                offspring_individuals: list[Individual] = []
+                offspring_lineage: list[tuple[str, str]] = []  # (parent_hash, child_hash)
+
+                for genome, parent_hash in offspring_genomes:
+                    ind = self._identity.process(genome)
+                    if ind is None:
+                        continue
+                    # Set generation
+                    ind.generation = gen
+                    self._total_offspring_attempted += 1
+                    if self._identity.is_duplicate(ind.ir_hash, known_hashes):
+                        self._dedup_count += 1
+                        continue
+                    known_hashes.add(ind.ir_hash)
+                    offspring_individuals.append(ind)
+                    offspring_lineage.append((parent_hash, ind.ir_hash))
+
+                if not offspring_individuals:
+                    logger.debug("No novel offspring in generation %d", gen)
+                    if not ablation.disable_memory:
+                        self._memory.update([], gen)
+                    await self._check_stagnation(gen)
+                    continue
+
+                # Evaluate offspring
+                evaluated_offspring = await self._evaluator.evaluate_batch(offspring_individuals)
+                self._total_evaluations += len(evaluated_offspring)
+
+                # Credit assignment
+                credited_offspring = self._assign_credits(evaluated_offspring)
+
+                # Assign behavior descriptors (only when MAP-Elites diversity)
+                if self.config.diversity.strategy == "map_elites":
+                    for ind in credited_offspring:
+                        if ind.ir is not None:
+                            try:
+                                ind.behavior_descriptor = self.backend.behavior_descriptor(
+                                    ind.ir, ind.diagnostics
+                                )
+                            except Exception:
+                                pass
+
+                # Survive
+                pop_list = self.population.get_all()
+                survivors = self._strategy.survive(
+                    pop_list, credited_offspring, self.config.population.elite_k
+                )
+
+                # Rebuild population from survivors
+                self.population = PopulationManager(max_size=self.config.population.size)
+                for ind in survivors:
+                    self.population.add(ind)
+
+                # Archive offspring and lineage
+                for ind in credited_offspring:
+                    await self.archive.store(ind)
+
+                for parent_hash, child_hash in offspring_lineage:
+                    await self.archive.store_lineage(
+                        parent_hash=parent_hash,
+                        child_hash=child_hash,
+                        operator_name="mutation",
+                        generation=gen,
+                    )
+
+                # Memory update
+                if not ablation.disable_memory:
+                    self._memory.update(credited_offspring, gen)
+
+                # Stagnation check
+                await self._check_stagnation(gen)
+
+                # Periodic reflection
+                if (
+                    not ablation.disable_reflection
+                    and self.llm_client is not None
+                    and gen % self.config.reflection.interval == 0
+                ):
+                    logger.info("Periodic reflection at generation %d", gen)
+                    await self._reflect(generation=gen)
+
+                logger.info(
+                    "Generation %d: pop_size=%d, best_fitness=%.4f, diversity=%.4f, evals=%d",
+                    gen,
+                    self.population.size,
+                    self._best_fitness(),
+                    self.population.diversity_entropy(),
+                    self._total_evaluations,
+                )
+        finally:
+            await self.backend.shutdown()
 
         return self._build_result(generations_run=min(max_gen, gen if max_gen > 0 else 0))
 
@@ -330,6 +369,8 @@ class EvolutionEngine:
 
     def _assign_credits(self, individuals: list[Individual]) -> list[Individual]:
         """Assign credit to each evaluated individual."""
+        if self.config.ablation.disable_credit:
+            return individuals
         for ind in individuals:
             if ind.fitness is not None and ind.ir is not None:
                 try:
@@ -377,14 +418,17 @@ class EvolutionEngine:
         self._reflected = True
         max_temp = self.config.llm.temperature_start + 0.3
         self._temperature = min(self._temperature + 0.2, max_temp)
-        if self.llm_client is not None:
+        if self.llm_client is not None and not self.config.ablation.disable_reflection:
             await self._reflect(generation)
 
     async def _reflect(self, generation: int) -> None:
         """Call the LLM for a reflection on the current population state."""
         try:
+            # Limit population to top_k for reflection prompt
+            top_k = self.config.reflection.include_top_k
+            pop = self.population.best(k=top_k)
             prompt = self.backend.format_reflection_prompt(
-                population=self.population.get_all(),
+                population=pop,
                 memory=self._memory,
                 generation=generation,
             )
@@ -405,7 +449,11 @@ class EvolutionEngine:
         """Build the final experiment result."""
         best = self.population.best(k=1)
         best_individual = best[0] if best else None
-        best_fitness = self._best_fitness()
+        best_fitness = (
+            best_individual.fitness.primary
+            if best_individual is not None and best_individual.fitness is not None
+            else 0.0
+        )
 
         metrics = {
             "cache_hit_rate": 0.0,  # Would need evaluator to track; placeholder

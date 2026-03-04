@@ -23,12 +23,14 @@ class Backend(ABC):
         ...
 
     @abstractmethod
-    def evaluate(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
+    async def evaluate(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
         """Evaluate an IR node and return (fitness, diagnostics, trace)."""
         ...
 
     @abstractmethod
-    def evaluate_stepwise(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
+    async def evaluate_stepwise(
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
         """Step-wise evaluation returning (fitness, diagnostics, trace)."""
         ...
 
@@ -112,3 +114,9 @@ class Backend(ABC):
     def default_operator_weights(self) -> dict[str, float]:
         """Return default mutation-operator weights for this domain."""
         ...
+
+    async def startup(self) -> None:
+        """Initialize backend resources (e.g. REPL process). No-op by default."""
+
+    async def shutdown(self) -> None:
+        """Release backend resources. No-op by default."""

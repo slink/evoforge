@@ -39,10 +39,16 @@ def main() -> None:
     # Create backend
     from evoforge.backends.lean.backend import LeanBackend
 
+    # LEAN_PROJECT_DIR env var overrides config
+    project_dir = os.environ.get("LEAN_PROJECT_DIR", config.backend.project_dir)
+
+    # Treat empty repl_path as None (TOML has repl_path = "")
+    repl_path = config.backend.repl_path or None
+
     backend = LeanBackend(
         theorem_statement=config.backend.theorem_statement,
-        project_dir=config.backend.project_dir,
-        repl_path=config.backend.repl_path,
+        project_dir=project_dir,
+        repl_path=repl_path,
     )
 
     # Create archive (in-memory SQLite)

@@ -138,10 +138,10 @@ class TestBackendCannotInstantiate:
             def parse(self, genome: str) -> Any:
                 return None
 
-            def evaluate(self, ir: Any, seed: int | None = None) -> Any:
+            async def evaluate(self, ir: Any, seed: int | None = None) -> Any:
                 return None
 
-            def evaluate_stepwise(self, ir: Any, seed: int | None = None) -> Any:
+            async def evaluate_stepwise(self, ir: Any, seed: int | None = None) -> Any:
                 return None
 
             def assign_credit(
