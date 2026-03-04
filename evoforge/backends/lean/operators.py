@@ -8,6 +8,7 @@ and prefix-splicing crossover.
 from __future__ import annotations
 
 import random
+from typing import Literal
 
 from evoforge.backends.lean.ir import TacticSequence, parse_tactic_sequence
 from evoforge.core.mutation import MutationContext, MutationOperator
@@ -42,7 +43,7 @@ class PrefixTruncation(MutationOperator):
         return "prefix_truncation"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -61,7 +62,7 @@ class TacticSwap(MutationOperator):
         return "tactic_swap"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -82,7 +83,7 @@ class TacticReorder(MutationOperator):
         return "tactic_reorder"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -106,7 +107,7 @@ class SplicePrefixes(MutationOperator):
         return "splice_prefixes"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:

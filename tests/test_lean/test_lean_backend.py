@@ -7,7 +7,8 @@ format_reflection_prompt(), and the corrected format_crossover_prompt() signatur
 from __future__ import annotations
 
 from evoforge.backends.lean.backend import LeanBackend
-from evoforge.core.types import Fitness, Individual
+from evoforge.core.types import Fitness
+from tests.conftest import make_individual
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,19 +22,6 @@ def _make_backend(
     return LeanBackend(
         theorem_statement=theorem,
         project_dir=project_dir,
-    )
-
-
-def _make_individual(
-    genome: str = "intro x\nsimp",
-    fitness: Fitness | None = None,
-) -> Individual:
-    return Individual(
-        genome=genome,
-        ir=None,
-        ir_hash="abcd1234",
-        generation=0,
-        fitness=fitness,
     )
 
 
@@ -128,7 +116,7 @@ class TestLeanBackendFormatReflectionPrompt:
     def test_returns_non_empty_string(self) -> None:
         backend = _make_backend()
         population = [
-            _make_individual(
+            make_individual(
                 genome="intro x\nsimp",
                 fitness=Fitness(primary=0.5, auxiliary={}, constraints={}, feasible=True),
             ),
@@ -140,7 +128,7 @@ class TestLeanBackendFormatReflectionPrompt:
     def test_includes_generation_number(self) -> None:
         backend = _make_backend()
         population = [
-            _make_individual(
+            make_individual(
                 genome="intro x\nsimp",
                 fitness=Fitness(primary=0.5, auxiliary={}, constraints={}, feasible=True),
             ),
@@ -151,7 +139,7 @@ class TestLeanBackendFormatReflectionPrompt:
     def test_includes_fitness_info(self) -> None:
         backend = _make_backend()
         population = [
-            _make_individual(
+            make_individual(
                 genome="intro x\nsimp",
                 fitness=Fitness(primary=0.8, auxiliary={}, constraints={}, feasible=True),
             ),
@@ -174,16 +162,16 @@ class TestLeanBackendFormatReflectionPrompt:
 class TestLeanBackendFormatCrossoverPrompt:
     def test_returns_non_empty_string(self) -> None:
         backend = _make_backend()
-        parent_a = _make_individual(genome="intro x\nsimp")
-        parent_b = _make_individual(genome="intro x\nring")
+        parent_a = make_individual(genome="intro x\nsimp")
+        parent_b = make_individual(genome="intro x\nring")
         result = backend.format_crossover_prompt(parent_a, parent_b, context=None)
         assert isinstance(result, str)
         assert len(result) > 0
 
     def test_includes_both_genomes(self) -> None:
         backend = _make_backend()
-        parent_a = _make_individual(genome="intro x\nsimp")
-        parent_b = _make_individual(genome="intro x\nring")
+        parent_a = make_individual(genome="intro x\nsimp")
+        parent_b = make_individual(genome="intro x\nring")
         result = backend.format_crossover_prompt(parent_a, parent_b, context=None)
         assert "intro x\nsimp" in result
         assert "intro x\nring" in result
@@ -191,8 +179,8 @@ class TestLeanBackendFormatCrossoverPrompt:
     def test_accepts_individual_not_string(self) -> None:
         """parent_b must be an Individual, not a raw genome string."""
         backend = _make_backend()
-        parent_a = _make_individual(genome="tactic_a")
-        parent_b = _make_individual(genome="tactic_b")
+        parent_a = make_individual(genome="tactic_a")
+        parent_b = make_individual(genome="tactic_b")
         # Should not raise — this confirms the signature accepts Individual
         result = backend.format_crossover_prompt(parent_a, parent_b, context=None)
         assert isinstance(result, str)

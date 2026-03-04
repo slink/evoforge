@@ -7,6 +7,7 @@ parsing, credit assignment, validation, mutation operators, and evaluation.
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import re
 from pathlib import Path
@@ -126,20 +127,30 @@ class LeanBackend(Backend):
             SplicePrefixes(),
         ]
 
+    @functools.lru_cache(maxsize=1)
     def system_prompt(self) -> str:
         """Render the system prompt template with the theorem statement."""
         template = self._jinja_env.get_template("system_prompt.j2")
         return template.render(theorem_statement=self.theorem_statement)
 
-    def format_mutation_prompt(self, parent: Individual, context: Any) -> str:
-        """Render the mutation prompt template for the LLM."""
+    @staticmethod
+    def _extract_diagnostics(individual: Individual) -> tuple[str, str]:
+        """Extract diagnostics summary and credit summary from an individual."""
         diagnostics_text = ""
-        if parent.diagnostics is not None and hasattr(parent.diagnostics, "summary"):
-            diagnostics_text = parent.diagnostics.summary(max_tokens=500)
+        if individual.diagnostics is not None and hasattr(individual.diagnostics, "summary"):
+            diagnostics_text = individual.diagnostics.summary(max_tokens=500)
 
         credit_text = ""
-        if parent.diagnostics is not None and hasattr(parent.diagnostics, "credit_summary"):
-            credit_text = parent.diagnostics.credit_summary(parent.credits, max_tokens=300)
+        if individual.diagnostics is not None and hasattr(
+            individual.diagnostics, "credit_summary"
+        ):
+            credit_text = individual.diagnostics.credit_summary(individual.credits, max_tokens=300)
+
+        return diagnostics_text, credit_text
+
+    def format_mutation_prompt(self, parent: Individual, context: Any) -> str:
+        """Render the mutation prompt template for the LLM."""
+        diagnostics_text, credit_text = self._extract_diagnostics(parent)
 
         memory_section = ""
         if context is not None and hasattr(context, "memory_section"):
@@ -210,6 +221,7 @@ class LeanBackend(Backend):
         """Return a version string for cache-keying."""
         return "lean_v1"
 
+    @functools.lru_cache(maxsize=1)
     def eval_config_hash(self) -> str:
         """Return a SHA-256 hash of the evaluation config, truncated to 16 chars."""
         content = f"{self.theorem_statement}:{self.project_dir}"
@@ -219,27 +231,26 @@ class LeanBackend(Backend):
         self, population: list[Individual], memory: Any, generation: int
     ) -> str:
         """Render the reflection prompt template with population statistics."""
-        # Compute population statistics
-        fitnesses = [ind.fitness.primary for ind in population if ind.fitness is not None]
+        # Single pass: collect evaluated individuals and unique genomes
+        evaluated: list[Individual] = []
+        unique_genomes: set[str] = set()
+        for ind in population:
+            unique_genomes.add(ind.genome)
+            if ind.fitness is not None:
+                evaluated.append(ind)
+
+        # Derive stats from the filtered list
+        fitnesses = [ind.fitness.primary for ind in evaluated]  # type: ignore[union-attr]
         best_fitness = max(fitnesses) if fitnesses else 0.0
         avg_fitness = sum(fitnesses) / len(fitnesses) if fitnesses else 0.0
+        diversity = len(unique_genomes) / len(population) if population else 0.0
 
-        # Simple diversity measure: number of unique genomes / population size
-        if population:
-            unique_genomes = len({ind.genome for ind in population})
-            diversity = unique_genomes / len(population)
-        else:
-            diversity = 0.0
-
-        # Top individuals sorted by fitness
-        evaluated = [ind for ind in population if ind.fitness is not None]
         top_individuals = sorted(
             evaluated,
             key=lambda ind: ind.fitness.primary,  # type: ignore[union-attr]
             reverse=True,
         )[:5]
 
-        # Memory section
         memory_section = ""
         if memory is not None:
             memory_section = str(memory)
@@ -270,13 +281,7 @@ class LeanBackend(Backend):
         self, parent_a: Individual, parent_b: Individual, context: Any
     ) -> str:
         """Render the crossover prompt template for the LLM."""
-        diagnostics_a = ""
-        if parent_a.diagnostics is not None and hasattr(parent_a.diagnostics, "summary"):
-            diagnostics_a = parent_a.diagnostics.summary(max_tokens=500)
-
-        credit_a = ""
-        if parent_a.diagnostics is not None and hasattr(parent_a.diagnostics, "credit_summary"):
-            credit_a = parent_a.diagnostics.credit_summary(parent_a.credits, max_tokens=300)
+        diagnostics_a, credit_a = self._extract_diagnostics(parent_a)
 
         template = self._jinja_env.get_template("crossover_prompt.j2")
         return template.render(

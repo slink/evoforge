@@ -2,34 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from evoforge.core.mutation import MutationContext
-from evoforge.core.types import Credit, Individual
+from evoforge.core.types import Credit
 from evoforge.llm.operators import LLMCrossover, LLMMutate
-
-
-@dataclass
-class _FakeLLMResponse:
-    """Minimal stand-in for LLMResponse."""
-
-    text: str
-    input_tokens: int = 10
-    output_tokens: int = 20
-    model: str = "test-model"
-
-
-def _make_individual(genome: str = "parent_genome") -> Individual:
-    return Individual(
-        genome=genome,
-        ir=None,
-        ir_hash="abc123",
-        generation=0,
-    )
+from tests.conftest import FakeLLMResponse, make_individual
 
 
 def _make_context(
@@ -67,15 +48,15 @@ class TestLLMCrossoverWithGuidanceIndividual:
     async def test_passes_both_parents_to_format_crossover_prompt(self) -> None:
         client = MagicMock()
         client.async_generate = AsyncMock(
-            return_value=_FakeLLMResponse(text="```lean\nnew_genome\n```")
+            return_value=FakeLLMResponse(text="```lean\nnew_genome\n```")
         )
         backend = MagicMock()
         backend.format_crossover_prompt.return_value = "crossover prompt"
         backend.system_prompt.return_value = "system"
         backend.extract_genome.return_value = "new_genome"
 
-        parent_a = _make_individual("genome_a")
-        parent_b = _make_individual("genome_b")
+        parent_a = make_individual("genome_a")
+        parent_b = make_individual("genome_b")
         ctx = _make_context(backend=backend, guidance_individual=parent_b)
 
         op = LLMCrossover(client=client, model="test-model")
@@ -95,14 +76,14 @@ class TestLLMCrossoverWithoutGuidanceIndividual:
     async def test_falls_back_to_format_mutation_prompt(self) -> None:
         client = MagicMock()
         client.async_generate = AsyncMock(
-            return_value=_FakeLLMResponse(text="```lean\nmutated\n```")
+            return_value=FakeLLMResponse(text="```lean\nmutated\n```")
         )
         backend = MagicMock()
         backend.format_mutation_prompt.return_value = "mutation prompt"
         backend.system_prompt.return_value = "system"
         backend.extract_genome.return_value = "mutated_genome"
 
-        parent = _make_individual("genome_a")
+        parent = make_individual("genome_a")
         ctx = _make_context(backend=backend, guidance_individual=None)
 
         op = LLMCrossover(client=client, model="test-model")
@@ -127,14 +108,14 @@ class TestLLMMutateSuccess:
     async def test_returns_extracted_genome(self) -> None:
         client = MagicMock()
         client.async_generate = AsyncMock(
-            return_value=_FakeLLMResponse(text="```lean\nnew_code\n```")
+            return_value=FakeLLMResponse(text="```lean\nnew_code\n```")
         )
         backend = MagicMock()
         backend.format_mutation_prompt.return_value = "mutation prompt"
         backend.system_prompt.return_value = "system"
         backend.extract_genome.return_value = "extracted_genome"
 
-        parent = _make_individual("original")
+        parent = make_individual("original")
         ctx = _make_context(backend=backend)
 
         op = LLMMutate(client=client, model="test-model")
@@ -150,13 +131,13 @@ class TestLLMMutateFallback:
     @pytest.mark.asyncio
     async def test_falls_back_to_parent_genome(self) -> None:
         client = MagicMock()
-        client.async_generate = AsyncMock(return_value=_FakeLLMResponse(text="garbage output"))
+        client.async_generate = AsyncMock(return_value=FakeLLMResponse(text="garbage output"))
         backend = MagicMock()
         backend.format_mutation_prompt.return_value = "mutation prompt"
         backend.system_prompt.return_value = "system"
         backend.extract_genome.return_value = None  # extraction fails
 
-        parent = _make_individual("original_genome")
+        parent = make_individual("original_genome")
         ctx = _make_context(backend=backend)
 
         op = LLMMutate(client=client, model="test-model")

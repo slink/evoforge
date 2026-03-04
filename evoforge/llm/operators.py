@@ -8,7 +8,7 @@ combines two parents guided by credit analysis.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from evoforge.core.mutation import MutationContext, MutationOperator
 from evoforge.core.types import Individual
@@ -34,7 +34,7 @@ class LLMMutate(MutationOperator):
         return "llm_mutate"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "llm"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -76,7 +76,7 @@ class LLMCrossover(MutationOperator):
         return "llm_crossover"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "llm"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:

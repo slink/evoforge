@@ -45,7 +45,6 @@ class TestMemoryConfig:
         assert cfg.max_patterns == 20
         assert cfg.max_dead_ends == 15
         assert cfg.max_constructs == 30
-        assert cfg.stagnation_window == 20
 
 
 class TestSchedulerSettings:

@@ -130,8 +130,6 @@ class EvolutionEngine:
         self._total_evaluations = 0
         self._reflected = False
         self._temperature = config.llm.temperature
-        self._cache_hits: int = 0
-        self._cache_misses: int = 0
         self._dedup_count: int = 0
         self._total_offspring_attempted: int = 0
 
@@ -204,7 +202,7 @@ class EvolutionEngine:
                     logger.debug("Mutation failed for operator %s", operator.name, exc_info=True)
 
             # Identity pipeline + dedup
-            known_hashes = {ind.ir_hash for ind in self.population.get_all()}
+            known_hashes = {ind.ir_hash for ind in pop_list}
             offspring_individuals: list[Individual] = []
             offspring_lineage: list[tuple[str, str]] = []  # (parent_hash, child_hash)
 
@@ -354,6 +352,20 @@ class EvolutionEngine:
             return best[0].fitness.primary
         return 0.0
 
+    def _trailing_stagnation(self) -> int:
+        """Count how many consecutive generations share the best fitness at the tail."""
+        history = self._memory.best_fitness_history
+        if not history:
+            return 0
+        last = history[-1]
+        count = 0
+        for val in reversed(history):
+            if val == last:
+                count += 1
+            else:
+                break
+        return count
+
     async def _check_stagnation(self, generation: int) -> None:
         """Check for stagnation and trigger reflection if needed."""
         if not self._memory.is_stagnant():
@@ -382,7 +394,7 @@ class EvolutionEngine:
                 prompt,
                 system,
                 model,
-                0.7,
+                self._temperature,
                 self.config.llm.max_tokens,
             )
             logger.info("Reflection response received (%d chars)", len(response.text))
@@ -393,11 +405,7 @@ class EvolutionEngine:
         """Build the final experiment result."""
         best = self.population.best(k=1)
         best_individual = best[0] if best else None
-        best_fitness = (
-            best_individual.fitness.primary
-            if (best_individual and best_individual.fitness)
-            else 0.0
-        )
+        best_fitness = self._best_fitness()
 
         metrics = {
             "cache_hit_rate": 0.0,  # Would need evaluator to track; placeholder
@@ -406,14 +414,7 @@ class EvolutionEngine:
                 if self._total_offspring_attempted > 0
                 else 0.0
             ),
-            "stagnation_counter": float(
-                max(
-                    0,
-                    len(self._memory.best_fitness_history)
-                    - len(set(self._memory.best_fitness_history)),
-                )
-            ),
-            "estimated_cost_usd": self._scheduler.tracker.estimated_cost_usd,
+            "stagnation_counter": float(self._trailing_stagnation()),
         }
 
         return ExperimentResult(

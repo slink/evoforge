@@ -34,16 +34,6 @@ def _abstract_method_names(cls: type) -> set[str]:
     }
 
 
-def _make_individual(genome: str = "example") -> Individual:
-    """Create a minimal Individual for testing."""
-    return Individual(
-        genome=genome,
-        ir=None,
-        ir_hash="deadbeef",
-        generation=0,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Tests for required abstract methods
 # ---------------------------------------------------------------------------

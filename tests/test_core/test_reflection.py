@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 
 import pytest
 
@@ -16,21 +15,8 @@ from evoforge.core.config import (
     SelectionConfig,
 )
 from evoforge.core.engine import EvolutionEngine
+from tests.conftest import FakeLLMResponse
 from tests.test_core.test_engine import ConstantFitnessBackend
-
-# ---------------------------------------------------------------------------
-# Mock LLM client for tracking reflection calls
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class _MockLLMResponse:
-    """Minimal response matching LLMResponse shape."""
-
-    text: str
-    input_tokens: int
-    output_tokens: int
-    model: str
 
 
 class _MockReflectionLLMClient:
@@ -50,14 +36,14 @@ class _MockReflectionLLMClient:
         model: str,
         temperature: float,
         max_tokens: int = 4096,
-    ) -> _MockLLMResponse:
+    ) -> FakeLLMResponse:
         if model == self.reflection_model:
             self.reflection_call_count += 1
             self.last_reflection_model = model
             self.last_reflection_prompt = prompt
         else:
             self.mutation_call_count += 1
-        return _MockLLMResponse(
+        return FakeLLMResponse(
             text="Reflection: try different tactics.",
             input_tokens=100,
             output_tokens=50,
@@ -90,12 +76,7 @@ def _make_config(
     )
 
 
-@pytest.fixture
-async def archive() -> Archive:
-    """Create an in-memory archive for testing."""
-    a = Archive("sqlite+aiosqlite://")
-    await a.create_tables()
-    return a
+# archive fixture provided by tests/conftest.py
 
 
 # ---------------------------------------------------------------------------

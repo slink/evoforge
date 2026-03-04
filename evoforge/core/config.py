@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tomllib
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -26,7 +27,7 @@ class PopulationConfig(BaseModel):
 class SelectionConfig(BaseModel):
     """Parent selection strategy and parameters."""
 
-    strategy: str = "lexicase"
+    strategy: Literal["scalar_tournament", "pareto_nsga2", "lexicase", "map_elites"] = "lexicase"
     tournament_size: int = 3
     epsilon: float = 0.0
 
@@ -34,7 +35,7 @@ class SelectionConfig(BaseModel):
 class MutationConfig(BaseModel):
     """Mutation operator weights and schedule."""
 
-    schedule: str = "adaptive"
+    schedule: Literal["fixed", "phased", "adaptive"] = "adaptive"
     llm_weight: float = 0.6
     cheap_weight: float = 0.4
     crossover_weight: float = 0.2
@@ -48,7 +49,7 @@ class LLMConfig(BaseModel):
     temperature: float = 0.7
     temperature_start: float = 1.0
     temperature_end: float = 0.3
-    temperature_schedule: str = "linear"
+    temperature_schedule: Literal["linear", "fixed"] = "linear"
     max_tokens: int = 4096
     max_calls: int = 1000
     max_cost_usd: float = 50.0
@@ -78,11 +79,11 @@ class EvolutionConfig(BaseModel):
     max_generations: int = 100
     stagnation_window: int = 10
     checkpoint_every: int = 10
-    log_level: str = "INFO"
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
 
 class ReflectionConfig(BaseModel):
-    """Periodic reflection/summarization settings."""
+    """Periodic reflection/summarization settings.  # TODO: not yet wired into engine"""
 
     interval: int = 10
     include_top_k: int = 5
@@ -90,18 +91,17 @@ class ReflectionConfig(BaseModel):
 
 
 class MemoryConfig(BaseModel):
-    """Pattern and dead-end memory limits."""
+    """Pattern and dead-end memory limits.  # TODO: not yet wired into engine"""
 
     max_patterns: int = 20
     max_dead_ends: int = 15
     max_constructs: int = 30
-    stagnation_window: int = 20
 
 
 class SchedulerSettings(BaseModel):
-    """Concurrency and batching settings for the scheduler."""
+    """Concurrency and batching settings for the scheduler.  # TODO: not yet wired into engine"""
 
-    mode: str = "async_batch"
+    mode: Literal["async_batch"] = "async_batch"
     max_llm_concurrent: int = 4
     max_eval_concurrent: int = 8
     max_pending: int = 16
@@ -109,14 +109,14 @@ class SchedulerSettings(BaseModel):
 
 
 class DiversityConfig(BaseModel):
-    """Diversity-maintenance strategy."""
+    """Diversity-maintenance strategy.  # TODO: not yet wired into engine"""
 
-    strategy: str = "map_elites"
-    sampling: str = "weighted"
+    strategy: Literal["map_elites"] = "map_elites"
+    sampling: Literal["weighted"] = "weighted"
 
 
 class AblationConfig(BaseModel):
-    """Feature toggles for ablation studies."""
+    """Feature toggles for ablation studies.  # TODO: not yet wired into engine"""
 
     disable_llm: bool = False
     disable_diagnostics: bool = False

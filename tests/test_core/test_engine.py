@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -61,7 +61,7 @@ class MockAppendOperator(MutationOperator):
         return "mock_append"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -78,7 +78,7 @@ class MockShuffleOperator(MutationOperator):
         return "mock_shuffle"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -227,13 +227,7 @@ def _make_config(
         ),
     )
 
-
-@pytest.fixture
-async def archive() -> Archive:
-    """Create an in-memory archive for testing."""
-    a = Archive("sqlite+aiosqlite://")
-    await a.create_tables()
-    return a
+    # archive fixture provided by tests/conftest.py
 
 
 # ---------------------------------------------------------------------------
@@ -390,6 +384,6 @@ class TestExperimentResultMetrics:
         result = await self._run_engine(archive)
         assert "stagnation_counter" in result.metrics
 
-    async def test_result_has_estimated_cost(self, archive: Archive) -> None:
+    async def test_result_cost_dict_present(self, archive: Archive) -> None:
         result = await self._run_engine(archive)
-        assert "estimated_cost_usd" in result.metrics
+        assert isinstance(result.cost, dict)

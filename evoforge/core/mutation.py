@@ -11,7 +11,7 @@ from __future__ import annotations
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from evoforge.core.types import Credit, Individual
 
@@ -57,7 +57,7 @@ class MutationOperator(ABC):
 
     @property
     @abstractmethod
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         """Cost category: 'cheap' or 'llm'."""
         ...
 

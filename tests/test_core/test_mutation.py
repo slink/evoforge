@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from typing import Literal
 
 import pytest
 
@@ -27,7 +28,7 @@ class MockCheapOp(MutationOperator):
         return "cheap_op"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -42,7 +43,7 @@ class MockLLMOp(MutationOperator):
         return "llm_op"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "llm"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -57,7 +58,7 @@ class AnotherCheapOp(MutationOperator):
         return "another_cheap"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
@@ -72,7 +73,7 @@ class AnotherLLMOp(MutationOperator):
         return "another_llm"
 
     @property
-    def cost(self) -> str:
+    def cost(self) -> Literal["cheap", "llm"]:
         return "llm"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
