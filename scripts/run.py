@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import sys
+from pathlib import Path
 
 
 def main() -> None:
@@ -18,6 +19,10 @@ def main() -> None:
         "--max-generations", type=int, default=None, help="Override max generations"
     )
     parser.add_argument("--log-level", default=None, help="Override log level")
+    parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument(
+        "--output-dir", default=None, help="Output directory (default: runs/<run-name>/)"
+    )
     args = parser.parse_args()
 
     # Load config
@@ -25,9 +30,18 @@ def main() -> None:
 
     config = load_config(args.config)
 
-    # Override max_generations if provided
+    # Override config from CLI flags
     if args.max_generations is not None:
         config.evolution.max_generations = args.max_generations
+    if args.resume:
+        config.evolution.resume = True
+
+    # Determine output directory
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = Path("runs") / (config.run.name or "default")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Set up logging
     log_level = args.log_level or config.evolution.log_level
@@ -52,10 +66,11 @@ def main() -> None:
         imports=config.backend.imports,
     )
 
-    # Create archive (in-memory SQLite)
+    # Create archive (file-backed SQLite in output dir)
     from evoforge.core.archive import Archive
 
-    archive = Archive("sqlite+aiosqlite://")
+    db_path = output_dir / "archive.db"
+    archive = Archive(f"sqlite+aiosqlite:///{db_path}")
 
     # Create LLM client if API key is available
     llm_client = None

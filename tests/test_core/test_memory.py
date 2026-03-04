@@ -320,3 +320,53 @@ class TestUnscoredIndividuals:
         mem.update([scored, unscored], generation=0)
         assert len(mem.patterns) == 1
         assert len(mem.best_fitness_history) == 1
+
+
+# ---------------------------------------------------------------------------
+# Serialization roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_memory_to_dict_from_dict_roundtrip() -> None:
+    """to_dict/from_dict preserves all SearchMemory state."""
+    mem = SearchMemory(max_patterns=10, max_dead_ends=5, stagnation_window=3)
+
+    # Feed some data
+    individuals = [
+        Individual(
+            genome="tactic_a",
+            ir=None,
+            ir_hash="h1",
+            generation=1,
+            fitness=Fitness(primary=0.8, auxiliary={}, constraints={}, feasible=True),
+            credits=[Credit(location=0, score=1.5, signal="sig_a")],
+        ),
+        Individual(
+            genome="tactic_b",
+            ir=None,
+            ir_hash="h2",
+            generation=1,
+            fitness=Fitness(primary=0.05, auxiliary={}, constraints={}, feasible=True),
+            credits=[],
+        ),
+    ]
+    mem.update(individuals, generation=1)
+    mem.update(individuals, generation=2)
+
+    # Serialize
+    data = mem.to_dict()
+
+    # Restore into fresh memory
+    mem2 = SearchMemory(max_patterns=10, max_dead_ends=5, stagnation_window=3)
+    mem2.from_dict(data)
+
+    assert mem2.best_fitness_history == mem.best_fitness_history
+    assert mem2.credit_aggregates == mem.credit_aggregates
+    assert mem2.dead_ends == mem.dead_ends
+    assert len(mem2.patterns) == len(mem.patterns)
+    assert len(mem2.failures) == len(mem.failures)
+    # Verify pattern content matches
+    for p1, p2 in zip(mem.patterns, mem2.patterns):
+        assert p1.description == p2.description
+        assert p1.frequency == p2.frequency
+        assert abs(p1.avg_fitness - p2.avg_fitness) < 1e-9

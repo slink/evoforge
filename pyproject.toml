@@ -12,6 +12,7 @@ dependencies = [
     "greenlet==3.1.0",
     "aiosqlite>=0.20",
     "numpy>=1.26",
+    "rich>=13.0",
 ]
 
 [dependency-groups]

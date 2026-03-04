@@ -81,6 +81,7 @@ class EvolutionConfig(BaseModel):
     stagnation_window: int = 10
     checkpoint_every: int = 10
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    resume: bool = False
 
 
 class ReflectionConfig(BaseModel):

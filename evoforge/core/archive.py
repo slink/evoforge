@@ -71,6 +71,15 @@ class LineageRow(Base):
     created_at: Mapped[float] = mapped_column()
 
 
+class CheckpointRow(Base):
+    __tablename__ = "checkpoints"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    generation: Mapped[int] = mapped_column(index=True)
+    state_json: Mapped[str] = mapped_column(String)
+    created_at: Mapped[float] = mapped_column()
+
+
 # ---------------------------------------------------------------------------
 # Archive
 # ---------------------------------------------------------------------------
@@ -157,6 +166,27 @@ class Archive:
                 )
                 session.add(row)
 
+    def _row_to_individual(self, row: IndividualRow) -> Individual:
+        """Convert an IndividualRow to an Individual."""
+        fitness: Fitness | None = None
+        if row.fitness_json is not None:
+            fitness = _json_to_fitness(row.fitness_json)
+
+        bd: tuple[Any, ...] | None = None
+        if row.behavior_descriptor is not None:
+            bd = tuple(json.loads(row.behavior_descriptor))
+
+        return Individual(
+            genome=row.genome,
+            ir=None,  # IR is not round-trippable without a backend
+            ir_hash=row.ir_hash,
+            generation=row.generation,
+            fitness=fitness,
+            id=row.id,
+            behavior_descriptor=bd,
+            mutation_source=row.mutation_source,
+        )
+
     async def lookup(self, ir_hash: str) -> Individual | None:
         """Retrieve an individual by ir_hash, or None on miss."""
         from sqlalchemy import select
@@ -169,25 +199,26 @@ class Archive:
             ).scalar_one_or_none()
             if row is None:
                 return None
+            return self._row_to_individual(row)
 
-            fitness: Fitness | None = None
-            if row.fitness_json is not None:
-                fitness = _json_to_fitness(row.fitness_json)
+    async def lookup_many(self, ir_hashes: list[str]) -> dict[str, Individual]:
+        """Retrieve multiple individuals by ir_hash in a single query."""
+        from sqlalchemy import select
 
-            bd: tuple[Any, ...] | None = None
-            if row.behavior_descriptor is not None:
-                bd = tuple(json.loads(row.behavior_descriptor))
+        if not ir_hashes:
+            return {}
 
-            return Individual(
-                genome=row.genome,
-                ir=None,  # IR is not round-trippable without a backend
-                ir_hash=row.ir_hash,
-                generation=row.generation,
-                fitness=fitness,
-                id=row.id,
-                behavior_descriptor=bd,
-                mutation_source=row.mutation_source,
+        async with self._session_factory() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(IndividualRow).where(IndividualRow.ir_hash.in_(ir_hashes))
+                    )
+                )
+                .scalars()
+                .all()
             )
+            return {row.ir_hash: self._row_to_individual(row) for row in rows}
 
     # ---- fitness cache ---------------------------------------------------
 
@@ -300,3 +331,47 @@ class Archive:
                 }
                 for row in rows
             ]
+
+    # ---- checkpoints -------------------------------------------------
+
+    async def store_checkpoint(
+        self, generation: int, state: dict[str, Any], *, keep: int = 3
+    ) -> None:
+        """Store a checkpoint and prune all but the *keep* most recent."""
+        from sqlalchemy import delete, select
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = CheckpointRow(
+                    generation=generation,
+                    state_json=json.dumps(state),
+                    created_at=time.time(),
+                )
+                session.add(row)
+                await session.flush()
+
+                # Prune old checkpoints
+                keep_ids = (
+                    select(CheckpointRow.id)
+                    .order_by(CheckpointRow.generation.desc())
+                    .limit(keep)
+                    .scalar_subquery()
+                )
+                await session.execute(
+                    delete(CheckpointRow).where(CheckpointRow.id.not_in(keep_ids))
+                )
+
+    async def load_latest_checkpoint(self) -> dict[str, Any] | None:
+        """Load the most recent checkpoint, or None if no checkpoints exist."""
+        from sqlalchemy import select
+
+        async with self._session_factory() as session:
+            row = (
+                await session.execute(
+                    select(CheckpointRow).order_by(CheckpointRow.generation.desc()).limit(1)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            result: dict[str, Any] = json.loads(row.state_json)
+            return result

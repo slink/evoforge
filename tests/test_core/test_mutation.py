@@ -317,3 +317,49 @@ class TestSelectOperator:
         ensemble = MutationEnsemble(operators=[cheap])
         op = ensemble.select_operator()
         assert op.name == "cheap_op"
+
+
+# ---------------------------------------------------------------------------
+# MutationEnsemble – to_dict / from_dict roundtrip
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_to_dict_from_dict_roundtrip() -> None:
+    """to_dict/from_dict preserves MutationEnsemble state."""
+
+    class FakeOp(MutationOperator):
+        def __init__(self, op_name: str) -> None:
+            self._name = op_name
+
+        @property
+        def name(self) -> str:
+            return self._name
+
+        @property
+        def cost(self) -> Literal["cheap"]:
+            return "cheap"
+
+        async def apply(self, parent: Individual, context: MutationContext) -> str:
+            return parent.genome
+
+    ops = [FakeOp("op_a"), FakeOp("op_b")]
+    ens = MutationEnsemble(ops, schedule="fixed", weights=[0.7, 0.3])
+    ens.update_stats("op_a", success=True, fitness_delta=0.5)
+    ens.update_stats("op_a", success=False, fitness_delta=-0.1)
+    ens.update_stats("op_b", success=True, fitness_delta=0.3)
+
+    data = ens.to_dict()
+
+    # Restore into fresh ensemble
+    ops2 = [FakeOp("op_a"), FakeOp("op_b")]
+    ens2 = MutationEnsemble(ops2, schedule="fixed")
+    ens2.from_dict(data)
+
+    assert ens2.get_weights() == ens.get_weights()
+    assert ens2._total_applications == ens._total_applications
+    assert ens2.stats["op_a"].applications == 2
+    assert ens2.stats["op_a"].successes == 1
+    assert ens2.stats["op_a"].failures == 1
+    assert abs(ens2.stats["op_a"].total_fitness_delta - 0.4) < 1e-9
+    assert ens2.stats["op_b"].applications == 1
+    assert ens2.stats["op_b"].successes == 1

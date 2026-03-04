@@ -8,6 +8,7 @@ adaptive scheduling.
 
 from __future__ import annotations
 
+import dataclasses
 import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -152,6 +153,35 @@ class MutationEnsemble:
     def get_weights(self) -> dict[str, float]:
         """Return current selection weights keyed by operator name."""
         return {op.name: w for op, w in zip(self._operators, self._weights)}
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize ensemble state (weights, stats, total_applications)."""
+        return {
+            "weights": {op.name: w for op, w in zip(self._operators, self._weights)},
+            "stats": {name: dataclasses.asdict(s) for name, s in self.stats.items()},
+            "total_applications": self._total_applications,
+        }
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """Restore ensemble state from a dict produced by :meth:`to_dict`."""
+        # Restore weights
+        saved_weights = data.get("weights", {})
+        for i, op in enumerate(self._operators):
+            if op.name in saved_weights:
+                self._weights[i] = saved_weights[op.name]
+        # Renormalize
+        total = sum(self._weights)
+        if total > 0:
+            self._weights = [w / total for w in self._weights]
+
+        # Restore stats
+        saved_stats = data.get("stats", {})
+        for name, sdict in saved_stats.items():
+            if name in self.stats:
+                self.stats[name] = OperatorStats(**sdict)
+
+        # Restore total applications
+        self._total_applications = data.get("total_applications", 0)
 
     # ------------------------------------------------------------------
     # Internal helpers

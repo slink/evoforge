@@ -6,6 +6,8 @@ detection, and dead-end identification across generations.
 
 from __future__ import annotations
 
+from typing import Any
+
 from evoforge.core.types import FailureMode, Individual, Pattern
 
 # Thresholds for classifying individuals
@@ -151,6 +153,40 @@ class SearchMemory:
     def get_credit_summary(self) -> dict[str, float]:
         """Return current credit aggregates."""
         return dict(self.credit_aggregates)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize all memory state to a plain dict."""
+        return {
+            "best_fitness_history": list(self.best_fitness_history),
+            "pattern_data": {
+                desc: {"total_fitness": accum.total_fitness, "count": accum.count}
+                for desc, accum in self._pattern_data.items()
+            },
+            "failure_data": {
+                desc: {"count": accum.count, "last_seen": accum.last_seen}
+                for desc, accum in self._failure_data.items()
+            },
+            "dead_ends": list(self.dead_ends),
+            "credit_aggregates": dict(self.credit_aggregates),
+        }
+
+    def from_dict(self, data: dict[str, Any]) -> None:
+        """Restore all memory state from a dict produced by ``to_dict``."""
+        self.best_fitness_history = list(data.get("best_fitness_history", []))
+        self.credit_aggregates = dict(data.get("credit_aggregates", {}))
+        self.dead_ends = set(data.get("dead_ends", []))
+
+        self._pattern_data = {
+            desc: _PatternAccum(total_fitness=info["total_fitness"], count=info["count"])
+            for desc, info in data.get("pattern_data", {}).items()
+        }
+        self._failure_data = {
+            desc: _FailureAccum(count=info["count"], last_seen=info["last_seen"])
+            for desc, info in data.get("failure_data", {}).items()
+        }
+
+        self._rebuild_patterns()
+        self._rebuild_failures()
 
     # ------------------------------------------------------------------
     # Internal helpers
