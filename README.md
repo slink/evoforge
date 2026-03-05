@@ -57,8 +57,9 @@ scripts/
 ## Status
 
 - Core framework: implemented
-- Lean 4 backend: implemented
-- 337 tests, strict mypy, ruff
+- Lean 4 backend: implemented (REPL evaluation, stepwise credit, proof verification)
+- Checkpoint/resume for long runs
+- 416 tests, strict mypy, ruff
 
 ## Running with Lean
 
@@ -75,4 +76,10 @@ uv run python scripts/run.py --config configs/lean_default.toml --max-generation
 
 # Or override with env var
 LEAN_PROJECT_DIR=/other/path/to/LeanLevy uv run python scripts/run.py --config configs/lean_default.toml --max-generations 3
+
+# With checkpoint/resume and verification
+uv run python scripts/run.py --config configs/lean_default.toml --max-generations 50 --output-dir runs/exp1 --verify
+
+# Resume after crash
+uv run python scripts/run.py --config configs/lean_default.toml --output-dir runs/exp1 --resume
 ```
