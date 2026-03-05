@@ -82,6 +82,20 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 logger = logging.getLogger(__name__)
 
+# Fitness for false-positive proofs: REPL step-by-step says complete but cmd
+# verification rejects. Still feasible (preserves gradient signal) but below
+# any genuinely verified proof.
+_FALSE_POSITIVE_FITNESS = 0.9
+
+
+def _reindent_tactics(genome: str) -> str:
+    """Rebase tactic lines to 2-space indent, preserving relative indentation."""
+    tactic_lines = [ln for ln in genome.split("\n") if ln.strip()]
+    if not tactic_lines:
+        return ""
+    min_indent = min(len(ln) - len(ln.lstrip()) for ln in tactic_lines)
+    return "\n".join("  " + ln[min_indent:] for ln in tactic_lines)
+
 
 class LeanBackend(Backend):
     """Concrete backend for Lean 4 theorem proving.
@@ -172,16 +186,17 @@ class LeanBackend(Backend):
 
             # Inline verification for proof-complete results
             if fitness.primary >= 1.0 and fitness.auxiliary.get("proof_complete", 0.0) >= 1.0:
-                genome = ir.serialize() if hasattr(ir, "serialize") else str(ir)
+                genome = ir.serialize()
                 cmd_verified = await self._verify_via_repl_cmd(genome)
                 if not cmd_verified:
                     logger.info(
                         "REPL step-by-step said complete but cmd verification failed — "
-                        "downgrading to 0.9: %s",
+                        "downgrading to %.1f: %s",
+                        _FALSE_POSITIVE_FITNESS,
                         genome[:80],
                     )
                     fitness = Fitness(
-                        primary=0.9,
+                        primary=_FALSE_POSITIVE_FITNESS,
                         auxiliary={
                             **fitness.auxiliary,
                             "proof_complete": 0.0,
@@ -442,13 +457,12 @@ class LeanBackend(Backend):
             lines.append(self._imports)
             lines.append("")
         lines.append(f"{self.theorem_statement} := by")
-        tactic_lines = [ln for ln in genome.split("\n") if ln.strip()]
-        if tactic_lines:
-            min_indent = min(len(ln) - len(ln.lstrip()) for ln in tactic_lines)
-            for ln in tactic_lines:
-                lines.append("  " + ln[min_indent:])
+        body = _reindent_tactics(genome)
+        if body:
+            lines.append(body)
         return "\n".join(lines) + "\n"
 
+    @functools.lru_cache(maxsize=1)
     def _example_statement(self) -> str:
         """Convert 'theorem <name> ...' to 'example ...' for REPL cmd verification."""
         return re.sub(r"^theorem\s+\S+", "example", self.theorem_statement)
@@ -464,11 +478,9 @@ class LeanBackend(Backend):
 
         # Build the example command preserving indentation
         stmt = self._example_statement()
-        tactic_lines = [ln for ln in genome.split("\n") if ln.strip()]
-        if not tactic_lines:
+        body = _reindent_tactics(genome)
+        if not body:
             return False
-        min_indent = min(len(ln) - len(ln.lstrip()) for ln in tactic_lines)
-        body = "\n".join("  " + ln[min_indent:] for ln in tactic_lines)
         cmd_text = f"{stmt} := by\n{body}"
 
         cmd: dict[str, object] = {"cmd": cmd_text}
