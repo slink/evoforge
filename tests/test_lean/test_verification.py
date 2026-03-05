@@ -81,6 +81,19 @@ class TestVerifyProof:
             result = await backend.verify_proof("ring")
         assert result is False
 
+    async def test_verify_proof_passes_threads_flag(self, tmp_path: Path) -> None:
+        """verify_proof passes -j flag to lean."""
+        backend = _make_backend(project_dir=str(tmp_path))
+        backend._verification_threads = 4
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = b""
+
+        with patch("subprocess.run", return_value=mock_result) as mock_run:
+            await backend.verify_proof("exact rfl")
+        cmd = mock_run.call_args[0][0]
+        assert "-j4" in cmd
+
 
 # ---------------------------------------------------------------------------
 # Engine verification gate

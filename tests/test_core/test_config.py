@@ -10,6 +10,7 @@ from evoforge.core.config import (
     AblationConfig,
     BackendConfig,
     DiversityConfig,
+    EvalConfig,
     EvoforgeConfig,
     LLMConfig,
     MemoryConfig,
@@ -121,6 +122,12 @@ class TestLLMConfig:
 # ---------------------------------------------------------------------------
 # EvoforgeConfig has all new sections
 # ---------------------------------------------------------------------------
+
+
+class TestEvalConfig:
+    def test_verification_threads_default_zero(self) -> None:
+        cfg = EvalConfig()
+        assert cfg.verification_threads == 0
 
 
 class TestEvoforgeConfig:

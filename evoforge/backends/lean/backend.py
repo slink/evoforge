@@ -11,6 +11,7 @@ import asyncio
 import functools
 import hashlib
 import logging
+import os
 import re
 import subprocess
 import tempfile
@@ -127,9 +128,14 @@ class LeanBackend(Backend):
         imports: str = "",
         seeds: list[str] | None = None,
         extra_api_namespaces: list[str] | None = None,
+        verification_threads: int = 0,
     ) -> None:
         self.theorem_statement = theorem_statement
         self.project_dir = project_dir
+        if verification_threads == 0:
+            self._verification_threads = max(1, (os.cpu_count() or 2) // 2)
+        else:
+            self._verification_threads = verification_threads
         self._evaluator: LeanStepwiseEvaluator | None = None
         self._repl: LeanREPLProcess | None = None
         self.repl_path = repl_path
@@ -602,7 +608,7 @@ class LeanBackend(Backend):
             ret = await loop.run_in_executor(
                 None,
                 lambda: subprocess.run(
-                    ["lake", "env", "lean", str(temp_path)],
+                    ["lake", "env", "lean", f"-j{self._verification_threads}", str(temp_path)],
                     cwd=self.project_dir,
                     capture_output=True,
                     timeout=120,

@@ -62,6 +62,7 @@ class EvalConfig(BaseModel):
     max_concurrent: int = 4
     timeout_seconds: float = 60.0
     seed: int = 42
+    verification_threads: int = 0  # 0 = auto (cpu_count // 2), >0 = exact
 
 
 class BackendConfig(BaseModel):

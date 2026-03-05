@@ -74,6 +74,7 @@ def main() -> None:
         imports=config.backend.imports,
         seeds=config.backend.seeds or None,
         extra_api_namespaces=config.backend.extra_api_namespaces or None,
+        verification_threads=config.eval.verification_threads,
     )
 
     # Create archive (file-backed SQLite in output dir)
