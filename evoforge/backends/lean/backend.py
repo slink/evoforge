@@ -282,7 +282,9 @@ class LeanBackend(Backend):
             parts.append(
                 "Available from the LeanLevy library: "
                 "IsPositiveDefinite.conj_neg (Hermitian symmetry), "
-                "IsPositiveDefinite.sum_nonneg (PD matrix inequality)."
+                "IsPositiveDefinite.re_nonneg (PD form has nonneg real part), "
+                "IsPositiveDefinite.apply_zero_nonneg (φ(0).re ≥ 0), "
+                "IsPositiveDefinite.apply_zero_im (φ(0).im = 0)."
             )
         return "\n".join(parts)
 
@@ -338,6 +340,28 @@ class LeanBackend(Backend):
             else:
                 parts.append(f"Goal {i + 1}: ⊢ {gtype}")
         return "\n".join(parts)
+
+    @staticmethod
+    def _classify_cmd_error(error_msg: str) -> str:
+        """Normalize a REPL error message into a short category string.
+
+        Used for SearchMemory deduplication so that semantically-identical
+        errors map to the same pattern key.
+        """
+        msg = error_msg.strip()
+        if msg.startswith("unknown identifier"):
+            match = re.search(r"'([^']+)'", msg)
+            name = match.group(1) if match else "?"
+            return f"unknown_identifier:{name}"
+        if msg.startswith("type mismatch"):
+            return "type_mismatch"
+        if msg.startswith("unsolved goals"):
+            return "unsolved_goals"
+        if re.search(r"sorry", msg, re.IGNORECASE):
+            return "sorry"
+        first_line = msg.split("\n", 1)[0]
+        truncated = first_line[:60]
+        return f"other:{truncated}"
 
     def extract_genome(self, raw_text: str) -> str | None:
         """Extract content between ```lean and ``` markers.
