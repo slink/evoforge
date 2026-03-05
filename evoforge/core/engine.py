@@ -197,6 +197,7 @@ class EvolutionEngine:
 
                 credited_seeds = self._assign_credits(evaluated_seeds)
                 await self._verify_perfect_individuals(credited_seeds)
+                self._assign_behavior_descriptors(credited_seeds)
                 self._add_to_population(credited_seeds)
 
                 logger.info(
@@ -339,16 +340,8 @@ class EvolutionEngine:
                     # Verify fitness=1.0 proofs before survival selection
                     await self._verify_perfect_individuals(credited_offspring)
 
-                    # Assign behavior descriptors (only when MAP-Elites diversity)
-                    if self.config.diversity.strategy == "map_elites":
-                        for ind in credited_offspring:
-                            if ind.ir is not None:
-                                try:
-                                    ind.behavior_descriptor = self.backend.behavior_descriptor(
-                                        ind.ir, ind.diagnostics
-                                    )
-                                except Exception:
-                                    pass
+                    # Assign behavior descriptors to offspring
+                    self._assign_behavior_descriptors(credited_offspring)
 
                     # Survive
                     pop_list = self.population.get_all()
@@ -360,6 +353,9 @@ class EvolutionEngine:
                     self.population = PopulationManager(max_size=self.config.population.size)
                     for ind in survivors:
                         self.population.add(ind)
+
+                    # Refill if population collapsed due to dedup
+                    await self._refill_population(gen)
 
                     # Archive offspring and lineage
                     for ind in credited_offspring:
@@ -414,7 +410,11 @@ class EvolutionEngine:
                     )
 
                     if progress is not None:
-                        progress.update(task_id, advance=1, status=self._gen_status(gen))
+                        progress.update(
+                            task_id,
+                            advance=1,
+                            status=self._gen_status(gen, best_fit, diversity),
+                        )
             finally:
                 if rich_handler is not None:
                     root = logging.getLogger()
@@ -511,26 +511,124 @@ class EvolutionEngine:
                     logger.debug("Credit assignment failed", exc_info=True)
         return individuals
 
+    def _assign_behavior_descriptors(self, individuals: list[Individual]) -> None:
+        """Assign behavior descriptors to all individuals that have IR."""
+        for ind in individuals:
+            if ind.ir is not None and ind.behavior_descriptor is None:
+                try:
+                    ind.behavior_descriptor = self.backend.behavior_descriptor(
+                        ind.ir, ind.diagnostics
+                    )
+                except Exception:
+                    pass
+
+    async def _evaluate_and_fill(
+        self,
+        individuals: list[Individual],
+        existing_hashes: set[str],
+        target: int,
+    ) -> None:
+        """Evaluate novel individuals and add them to the population up to target size."""
+        novel = [ind for ind in individuals if ind.ir_hash not in existing_hashes]
+        if not novel:
+            return
+        evaluated = await self._evaluator.evaluate_batch(novel)
+        self._total_evaluations += len(evaluated)
+        self._assign_credits(evaluated)
+        await self._verify_perfect_individuals(evaluated)
+        self._assign_behavior_descriptors(evaluated)
+        for ind in evaluated:
+            if self.population.size >= target:
+                break
+            if self.population.add(ind):
+                existing_hashes.add(ind.ir_hash)
+
+    async def _refill_population(self, generation: int) -> None:
+        """Refill population to target size when it drops after survival selection.
+
+        Uses fresh seeds from the backend, evaluates and deduplicates them.
+        Falls back to cheap mutations on existing individuals if seeds are exhausted.
+        """
+        target = self.config.population.size
+        if self.population.size >= target:
+            return
+
+        deficit = target - self.population.size
+        logger.debug(
+            "Population at %d/%d after survival — refilling %d slots",
+            self.population.size,
+            target,
+            deficit,
+        )
+
+        existing_hashes = {ind.ir_hash for ind in self.population.get_all()}
+
+        # Phase 1: try fresh seeds
+        seed_genomes = self.backend.seed_population(deficit * 2)
+        seed_individuals = self._process_genomes(seed_genomes, generation=generation)
+        await self._evaluate_and_fill(seed_individuals, existing_hashes, target)
+
+        if self.population.size >= target:
+            return
+
+        # Phase 2: cheap mutations on existing population members
+        pop_list = self.population.get_all()
+        if not pop_list:
+            return
+
+        guidance = self._memory.prompt_section(max_tokens=200)
+        cheapest = self._ensemble.cheapest_operator()
+        tasks: list[asyncio.Task[str | None]] = []
+
+        async def _try_mutate(parent: Individual) -> str | None:
+            context = MutationContext(
+                generation=generation,
+                memory=self._memory,
+                guidance=guidance,
+                temperature=self._temperature,
+                backend=self.backend,
+                credits=parent.credits,
+            )
+            try:
+                return await cheapest.apply(parent, context)
+            except Exception:
+                return None
+
+        for i in range(deficit * 2):
+            tasks.append(asyncio.create_task(_try_mutate(pop_list[i % len(pop_list)])))
+
+        results = await asyncio.gather(*tasks)
+        mutant_genomes = [g for g in results if g is not None]
+        mutant_individuals = self._process_genomes(mutant_genomes, generation=generation)
+        await self._evaluate_and_fill(mutant_individuals, existing_hashes, target)
+
     def _add_to_population(self, individuals: list[Individual]) -> None:
         """Add individuals to the population manager, deduplicating by ir_hash."""
         for ind in individuals:
             self.population.add(ind)
 
-    def _gen_status(self, gen: int) -> str:
+    def _gen_status(
+        self, gen: int, best_fit: float | None = None, diversity: float | None = None
+    ) -> str:
         """Format a one-line status string for the current generation."""
+        if best_fit is None:
+            best_fit = self._best_fitness()
+        if diversity is None:
+            diversity = self.population.diversity_entropy()
         return (
-            f"gen {gen} | best={self._best_fitness():.4f}"
+            f"gen {gen} | best={best_fit:.4f}"
             f" | pop={self.population.size}"
-            f" | div={self.population.diversity_entropy():.4f}"
+            f" | div={diversity:.4f}"
             f" | evals={self._total_evaluations}"
         )
 
     def _best_fitness(self) -> float:
-        """Return the best primary fitness in the population."""
-        best = self.population.best(k=1)
-        if best and best[0].fitness is not None:
-            return best[0].fitness.primary
-        return 0.0
+        """Return the best primary fitness in the population (feasible only)."""
+        best_val = 0.0
+        for ind in self.population.get_all():
+            if ind.fitness is not None and ind.fitness.feasible:
+                best_val = max(best_val, ind.fitness.primary)
+        return best_val
 
     def _trailing_stagnation(self) -> int:
         """Count how many consecutive generations share the best fitness at the tail."""
@@ -671,25 +769,21 @@ class EvolutionEngine:
                 verified = await self.backend.verify_proof(ind.genome)
                 if not verified:
                     logger.warning(
-                        "Proof failed verification — downgrading fitness from 1.0 to 0.95: %s",
+                        "Proof failed verification — marking infeasible: %s",
                         ind.genome[:80],
                     )
                     ind.fitness = Fitness(
-                        primary=0.95,
+                        primary=ind.fitness.primary,
                         auxiliary=ind.fitness.auxiliary,
                         constraints=ind.fitness.constraints,
-                        feasible=ind.fitness.feasible,
+                        feasible=False,
                     )
 
     def _build_result(self, generations_run: int) -> ExperimentResult:
         """Build the final experiment result."""
         best = self.population.best(k=1)
         best_individual = best[0] if best else None
-        best_fitness = (
-            best_individual.fitness.primary
-            if best_individual is not None and best_individual.fitness is not None
-            else 0.0
-        )
+        best_fitness = self._best_fitness()
 
         metrics = {
             "cache_hit_rate": 0.0,  # Would need evaluator to track; placeholder

@@ -783,3 +783,156 @@ class TestOperatorNameInLineage:
             assert "mutation" not in found_operator_names
             # Should be one of the mock operators
             assert found_operator_names <= {"mock_append", "mock_shuffle"}
+
+
+# ---------------------------------------------------------------------------
+# Behavior descriptors assigned to all individuals
+# ---------------------------------------------------------------------------
+
+
+class TestBehaviorDescriptorsAssigned:
+    """Behavior descriptors are assigned to seeds, offspring, and survivors."""
+
+    async def test_seeds_have_behavior_descriptors(self, archive: Archive) -> None:
+        """After gen 0, all individuals have behavior_descriptor set."""
+        config = _make_config(max_generations=0, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        pop = engine.population.get_all()
+        assert len(pop) > 0
+        for ind in pop:
+            assert ind.behavior_descriptor is not None, (
+                f"Seed individual {ind.ir_hash} missing behavior_descriptor"
+            )
+
+    async def test_diversity_nonzero_with_descriptors(self, archive: Archive) -> None:
+        """diversity_entropy() > 0 is possible when descriptors are assigned."""
+        config = _make_config(max_generations=1, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # All individuals should have descriptors
+        pop = engine.population.get_all()
+        descriptors = [ind.behavior_descriptor for ind in pop]
+        assert all(d is not None for d in descriptors)
+
+    async def test_descriptors_assigned_without_map_elites(self, archive: Archive) -> None:
+        """Descriptors assigned even when strategy is not map_elites."""
+        config = _make_config(max_generations=2, population_size=5)
+        assert config.selection.strategy == "scalar_tournament"
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        pop = engine.population.get_all()
+        for ind in pop:
+            assert ind.behavior_descriptor is not None
+
+
+# ---------------------------------------------------------------------------
+# Feasibility constraint for failed verification
+# ---------------------------------------------------------------------------
+
+
+class PartialVerifyBackend(MockBackend):
+    """Backend where fitness=1.0 but verify_proof always fails."""
+
+    async def evaluate(  # type: ignore[override]
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
+        mock_ir: MockIR = ir
+        non_empty = len([line for line in mock_ir.lines if line.strip()])
+        primary = min(non_empty / 10.0, 1.0)
+        fitness = Fitness(
+            primary=primary,
+            auxiliary={"line_count": float(non_empty)},
+            constraints={},
+            feasible=True,
+        )
+        return fitness, {"lines": non_empty}, {"steps": mock_ir.lines}
+
+    async def verify_proof(self, genome: str) -> bool:
+        return False
+
+
+class TestFeasibilityConstraint:
+    """Failed verification sets feasible=False; infeasible never beats feasible."""
+
+    async def test_failed_verification_sets_infeasible(self, archive: Archive) -> None:
+        """Proofs that fail verify_proof get feasible=False, primary stays 1.0."""
+        config = _make_config(max_generations=0, population_size=5)
+        backend = PerfectFitnessBackend()
+        backend.verify_proof = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        pop = engine.population.get_all()
+        for ind in pop:
+            assert ind.fitness is not None
+            assert ind.fitness.feasible is False, "Failed verification should set feasible=False"
+            assert ind.fitness.primary == 1.0, "Primary fitness should stay at 1.0"
+
+    async def test_infeasible_never_triggers_early_exit(self, archive: Archive) -> None:
+        """Even with primary=1.0, infeasible proofs don't cause early exit."""
+        config = _make_config(max_generations=5, population_size=5)
+        backend = PerfectFitnessBackend()
+        backend.verify_proof = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        result = await engine.run()
+
+        # Should run all 5 generations since no feasible proof was found
+        assert result.generations_run == 5
+
+    async def test_infeasible_ranks_below_feasible_in_selection(self, archive: Archive) -> None:
+        """In selection, feasible individuals always rank above infeasible ones."""
+        from evoforge.core.selection import _primary_fitness
+
+        feasible_ind = Individual(
+            genome="a",
+            ir=None,
+            ir_hash="a",
+            generation=0,
+            fitness=Fitness(primary=0.3, auxiliary={}, constraints={}, feasible=True),
+        )
+        infeasible_ind = Individual(
+            genome="b",
+            ir=None,
+            ir_hash="b",
+            generation=0,
+            fitness=Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=False),
+        )
+
+        assert _primary_fitness(feasible_ind) > _primary_fitness(infeasible_ind)
+
+
+# ---------------------------------------------------------------------------
+# Population floor enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestPopulationFloor:
+    """Population is refilled when it drops below target after survival selection."""
+
+    async def test_population_stays_near_target(self, archive: Archive) -> None:
+        """After multiple generations, population doesn't collapse to tiny size."""
+        config = _make_config(max_generations=5, population_size=10)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # Population should be at least half the target
+        assert engine.population.size >= 5, f"Population collapsed to {engine.population.size}"
+
+    async def test_refill_adds_novel_individuals(self, archive: Archive) -> None:
+        """Refill adds individuals with unique ir_hashes."""
+        config = _make_config(max_generations=3, population_size=8)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        pop = engine.population.get_all()
+        hashes = [ind.ir_hash for ind in pop]
+        assert len(hashes) == len(set(hashes)), "Refill introduced duplicate hashes"

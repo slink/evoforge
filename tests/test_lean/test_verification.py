@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from evoforge.backends.lean.backend import _SEED_BANK, LeanBackend
 from evoforge.backends.lean.evaluator import LeanDiagnostics
 from evoforge.backends.lean.ir import parse_tactic_sequence
@@ -110,9 +108,13 @@ class TestEngineVerificationGate:
         engine = EvolutionEngine(config=config, backend=backend, archive=archive)
         result = await engine.run()
 
-        # With verification failing, fitness should be downgraded from 1.0
+        # With verification failing, all proofs marked infeasible.
+        # best_fitness only considers feasible individuals, so it should be < 1.0
         assert result.best_fitness < 1.0
-        assert result.best_fitness == pytest.approx(0.95)
+        pop = engine.population.get_all()
+        for ind in pop:
+            if ind.fitness is not None and ind.fitness.primary >= 1.0:
+                assert ind.fitness.feasible is False
 
     async def test_engine_allows_verified_proof(self, archive: Archive) -> None:
         """Engine keeps fitness=1.0 when verify_proof returns True."""

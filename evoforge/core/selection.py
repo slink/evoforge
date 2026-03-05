@@ -30,8 +30,13 @@ class SelectionStrategy(ABC):
 
 
 def _primary_fitness(ind: Individual) -> float:
-    """Extract primary fitness, defaulting to -inf for unscored individuals."""
+    """Extract primary fitness, defaulting to -inf for unscored individuals.
+
+    Infeasible individuals (Deb 2000) always rank below all feasible ones.
+    """
     if ind.fitness is None:
+        return -math.inf
+    if not ind.fitness.feasible:
         return -math.inf
     return ind.fitness.primary
 
