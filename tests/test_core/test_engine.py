@@ -671,6 +671,61 @@ class TestDecayingTemperatureBoost:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Early exit on perfect fitness
+# ---------------------------------------------------------------------------
+
+
+class PerfectFitnessBackend(MockBackend):
+    """Backend where every individual gets fitness=1.0 (proof complete)."""
+
+    async def evaluate(  # type: ignore[override]
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
+        fitness = Fitness(
+            primary=1.0,
+            auxiliary={"proof_complete": 1.0},
+            constraints={},
+            feasible=True,
+        )
+        return fitness, {"lines": 1}, {"steps": []}
+
+
+class TestEarlyExitOnPerfectFitness:
+    """Engine exits early when best_fitness reaches 1.0."""
+
+    async def test_exits_before_max_generations(self, archive: Archive) -> None:
+        """With perfect fitness from gen 0, engine should not run all generations."""
+        config = _make_config(max_generations=20, population_size=5)
+        backend = PerfectFitnessBackend()
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=None,
+        )
+        result = await engine.run()
+
+        # Should exit well before 20 generations
+        assert result.generations_run < 20, (
+            f"Engine ran all {result.generations_run} generations despite perfect fitness"
+        )
+        assert result.best_fitness >= 1.0
+
+    async def test_logs_early_exit(
+        self, archive: Archive, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Early exit is logged."""
+        config = _make_config(max_generations=10, population_size=5)
+        backend = PerfectFitnessBackend()
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=None,
+        )
+
+        with caplog.at_level(logging.INFO):
+            await engine.run()
+
+        assert any("perfect fitness" in r.message.lower() or "early" in r.message.lower()
+                    for r in caplog.records)
+
+
 class TestOperatorNameInLineage:
     """Fix 3: store_lineage receives actual operator name, not 'mutation'."""
 

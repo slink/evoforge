@@ -392,6 +392,14 @@ class EvolutionEngine:
                     best_fit = self._best_fitness()
                     diversity = self.population.diversity_entropy()
 
+                    # Early exit: proof is complete
+                    if best_fit >= 1.0:
+                        logger.info(
+                            "Perfect fitness reached at generation %d; early exit",
+                            gen,
+                        )
+                        break
+
                     logger.info(
                         "Generation %d: pop_size=%d, best_fitness=%.4f, diversity=%.4f, evals=%d",
                         gen,
