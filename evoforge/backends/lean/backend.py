@@ -12,6 +12,8 @@ import functools
 import hashlib
 import logging
 import re
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +65,14 @@ _SEED_BANK: list[str] = [
     "push_neg\nsimp",
     "gcongr",
     "trivial",
+    # --- Multi-step structured proof seeds ---
+    "by_cases h : _ = 0\n· simp [h]\n· sorry",
+    "have h : _ := by sorry\nexact h",
+    "calc _ ≤ _ := by sorry\n  _ = _ := by sorry",
+    "refine le_of_eq ?_\nsimp",
+    "rw [norm_le_iff]\nconstructor\n· linarith\n· linarith",
+    "apply norm_le_of_sq_le_sq'\n· positivity\n· sorry",
+    "suffices h : _ by exact h\nsorry",
 ]
 
 # Regex for extracting Lean code blocks from LLM output
@@ -88,6 +98,7 @@ class LeanBackend(Backend):
         project_dir: str,
         repl_path: str | None = None,
         imports: str = "",
+        seeds: list[str] | None = None,
     ) -> None:
         self.theorem_statement = theorem_statement
         self.project_dir = project_dir
@@ -97,6 +108,7 @@ class LeanBackend(Backend):
         self._imports = imports
         self._repl_lock = asyncio.Lock()
         self._prefix_cache: dict[str, int] = {}
+        self._config_seeds: list[str] = seeds or []
 
         self._jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -172,8 +184,13 @@ class LeanBackend(Backend):
         return validate_structure_lean(ir)
 
     def seed_population(self, n: int) -> list[str]:
-        """Generate *n* seed genomes by cycling through the seed bank."""
-        return [_SEED_BANK[i % len(_SEED_BANK)] for i in range(n)]
+        """Generate *n* seed genomes by cycling through the seed bank.
+
+        If config-provided seeds are available, they are prepended to the
+        default bank so theorem-specific seeds appear first.
+        """
+        bank = self._config_seeds + _SEED_BANK if self._config_seeds else _SEED_BANK
+        return [bank[i % len(bank)] for i in range(n)]
 
     def mutation_operators(self) -> list[MutationOperator]:
         """Return the four cheap structural mutation operators."""
@@ -188,7 +205,38 @@ class LeanBackend(Backend):
     def system_prompt(self) -> str:
         """Render the system prompt template with the theorem statement."""
         template = self._jinja_env.get_template("system_prompt.j2")
-        return template.render(theorem_statement=self.theorem_statement)
+        # Derive math context from the imports / theorem for richer prompts
+        math_context = self._derive_math_context()
+        return template.render(
+            theorem_statement=self.theorem_statement,
+            math_context=math_context,
+        )
+
+    def _derive_math_context(self) -> str:
+        """Build mathematical context hints from imports and theorem statement."""
+        parts: list[str] = []
+        stmt = self.theorem_statement.lower()
+        if "positivedefinite" in stmt or "positive_definite" in stmt:
+            parts.append(
+                "The theorem involves positive definite functions. "
+                "A function φ : ℝ → ℂ is positive definite if for all "
+                "finite sequences x₁...xₙ and c₁...cₙ, the sum "
+                "∑ᵢⱼ cᵢ* cⱼ φ(xᵢ - xⱼ) ≥ 0. Key properties: "
+                "φ(0) is real and non-negative, |φ(x)| ≤ φ(0), "
+                "φ(-x) = conj(φ(x)) (Hermitian symmetry)."
+            )
+        if "norm" in stmt or "‖" in stmt:
+            parts.append(
+                "This involves complex norms. Useful lemmas: "
+                "norm_nonneg, norm_le_iff, sq_le_sq', norm_sq_eq_abs."
+            )
+        if "leanlevy" in self._imports.lower():
+            parts.append(
+                "Available from the LeanLevy library: "
+                "IsPositiveDefinite.conj_neg (Hermitian symmetry), "
+                "IsPositiveDefinite.sum_nonneg (PD matrix inequality)."
+            )
+        return "\n".join(parts)
 
     @staticmethod
     def _extract_diagnostics(individual: Individual) -> tuple[str, str]:
@@ -213,13 +261,35 @@ class LeanBackend(Backend):
         if context is not None and hasattr(context, "memory_section"):
             memory_section = context.memory_section
 
+        # Extract goal state from diagnostics for richer LLM context
+        goal_state = self._extract_goal_state(parent)
+
         template = self._jinja_env.get_template("mutation_prompt.j2")
         return template.render(
             genome=parent.genome,
             diagnostics=diagnostics_text,
             credit_summary=credit_text,
             memory_section=memory_section,
+            goal_state=goal_state,
         )
+
+    @staticmethod
+    def _extract_goal_state(individual: Individual) -> str:
+        """Extract the remaining goal state from diagnostics for the mutation prompt."""
+        diag = individual.diagnostics
+        if diag is None:
+            return ""
+        goal_types = getattr(diag, "goal_types", [])
+        goal_contexts = getattr(diag, "goal_contexts", [])
+        if not goal_types:
+            return ""
+        parts: list[str] = []
+        for i, (gtype, gctx) in enumerate(zip(goal_types, goal_contexts)):
+            if gctx:
+                parts.append(f"Goal {i + 1}:\n  {gctx}\n  ⊢ {gtype}")
+            else:
+                parts.append(f"Goal {i + 1}: ⊢ {gtype}")
+        return "\n".join(parts)
 
     def extract_genome(self, raw_text: str) -> str | None:
         """Extract content between ```lean and ``` markers.
@@ -343,6 +413,54 @@ class LeanBackend(Backend):
             if tactic.strip():
                 lines.append(f"  {tactic.strip()}")
         return "\n".join(lines) + "\n"
+
+    async def verify_proof(self, genome: str) -> bool:
+        """Verify a proof by compiling it with ``lake env lean``.
+
+        Writes a standalone proof file into the Lean project directory,
+        invokes the Lean compiler, and returns ``True`` only if compilation
+        succeeds (exit code 0).
+        """
+        proof_text = self.format_proof(genome)
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".lean",
+                dir=self.project_dir,
+                prefix="_evoforge_verify_",
+                delete=False,
+            ) as f:
+                f.write(proof_text)
+                temp_path = Path(f.name)
+
+            loop = asyncio.get_running_loop()
+            ret = await loop.run_in_executor(
+                None,
+                lambda: subprocess.run(
+                    ["lake", "env", "lean", str(temp_path)],
+                    cwd=self.project_dir,
+                    capture_output=True,
+                    timeout=120,
+                ),
+            )
+            if ret.returncode == 0:
+                logger.info("Proof verified by lake env lean")
+                return True
+            else:
+                logger.warning(
+                    "Proof failed lake verification (exit %d): %s",
+                    ret.returncode,
+                    ret.stderr.decode(errors="replace")[:500],
+                )
+                return False
+        except Exception:
+            logger.warning("verify_proof() raised an exception", exc_info=True)
+            return False
+        finally:
+            try:
+                temp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     # -- Extra helpers ------------------------------------------------------
 

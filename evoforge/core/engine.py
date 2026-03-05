@@ -38,7 +38,7 @@ from evoforge.core.selection import (
     ScalarTournament,
     SelectionStrategy,
 )
-from evoforge.core.types import Individual
+from evoforge.core.types import Fitness, Individual
 
 logger = logging.getLogger(__name__)
 
@@ -196,6 +196,7 @@ class EvolutionEngine:
                 self._total_evaluations += len(evaluated_seeds)
 
                 credited_seeds = self._assign_credits(evaluated_seeds)
+                await self._verify_perfect_individuals(credited_seeds)
                 self._add_to_population(credited_seeds)
 
                 logger.info(
@@ -335,6 +336,9 @@ class EvolutionEngine:
                     # Credit assignment
                     credited_offspring = self._assign_credits(evaluated_offspring)
 
+                    # Verify fitness=1.0 proofs before survival selection
+                    await self._verify_perfect_individuals(credited_offspring)
+
                     # Assign behavior descriptors (only when MAP-Elites diversity)
                     if self.config.diversity.strategy == "map_elites":
                         for ind in credited_offspring:
@@ -392,10 +396,10 @@ class EvolutionEngine:
                     best_fit = self._best_fitness()
                     diversity = self.population.diversity_entropy()
 
-                    # Early exit: proof is complete
+                    # Early exit: proof is complete (only after verification)
                     if best_fit >= 1.0:
                         logger.info(
-                            "Perfect fitness reached at generation %d; early exit",
+                            "Verified proof found at generation %d; early exit",
                             gen,
                         )
                         break
@@ -655,6 +659,27 @@ class EvolutionEngine:
         )
 
         return checkpoint_gen + 1
+
+    async def _verify_perfect_individuals(self, individuals: list[Individual]) -> None:
+        """Verify fitness=1.0 individuals via backend.verify_proof().
+
+        If verification fails, downgrade fitness to 0.95 so the engine
+        does not falsely claim a proof was found.
+        """
+        for ind in individuals:
+            if ind.fitness is not None and ind.fitness.primary >= 1.0:
+                verified = await self.backend.verify_proof(ind.genome)
+                if not verified:
+                    logger.warning(
+                        "Proof failed verification — downgrading fitness from 1.0 to 0.95: %s",
+                        ind.genome[:80],
+                    )
+                    ind.fitness = Fitness(
+                        primary=0.95,
+                        auxiliary=ind.fitness.auxiliary,
+                        constraints=ind.fitness.constraints,
+                        feasible=ind.fitness.feasible,
+                    )
 
     def _build_result(self, generations_run: int) -> ExperimentResult:
         """Build the final experiment result."""

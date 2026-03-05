@@ -120,6 +120,15 @@ class Backend(ABC):
         """Format a genome into a complete, standalone proof for this domain."""
         ...
 
+    async def verify_proof(self, genome: str) -> bool:
+        """Verify a completed proof using the backend's gold-standard checker.
+
+        For formal verification backends, this should compile the proof
+        independently of the REPL (e.g. via ``lake env lean``).  Returns
+        ``True`` by default for backends without a formal verifier.
+        """
+        return True
+
     async def startup(self) -> None:
         """Initialize backend resources (e.g. REPL process). No-op by default."""
 

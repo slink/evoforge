@@ -8,6 +8,15 @@ You are mutating a Lean 4 tactic proof to make progress toward closing all goals
 ## Diagnostics
 {{ diagnostics }}
 
+{% if goal_state %}
+## Current Goal State
+The following goals remain to be proved after the last successful tactic:
+```
+{{ goal_state }}
+```
+Focus on closing or simplifying these goals.
+{% endif %}
+
 ## Credit Analysis
 {{ credit_summary }}
 
@@ -18,4 +27,8 @@ You are mutating a Lean 4 tactic proof to make progress toward closing all goals
 
 ## Instructions
 Modify the proof to address the issues above. Focus on the failing or low-credit steps.
+If the proof is stuck, consider:
+- Restructuring with `by_cases`, `have`, `calc`, or `suffices`
+- Replacing failing tactics with different approaches
+- Adding intermediate lemmas to break the proof into smaller steps
 Return your complete tactic proof inside a ```lean code block.

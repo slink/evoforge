@@ -72,6 +72,7 @@ class BackendConfig(BaseModel):
     project_dir: str = ""
     repl_path: str | None = None
     imports: str = ""
+    seeds: list[str] = []
 
 
 class EvolutionConfig(BaseModel):

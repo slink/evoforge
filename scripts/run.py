@@ -23,6 +23,11 @@ def main() -> None:
     parser.add_argument(
         "--output-dir", default=None, help="Output directory (default: runs/<run-name>/)"
     )
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Verify winning proof with lake env lean after the run",
+    )
     args = parser.parse_args()
 
     # Load config
@@ -67,6 +72,7 @@ def main() -> None:
         project_dir=project_dir,
         repl_path=repl_path,
         imports=config.backend.imports,
+        seeds=config.backend.seeds or None,
     )
 
     # Create archive (file-backed SQLite in output dir)
@@ -107,6 +113,22 @@ def main() -> None:
             proof_path = output_dir / "proof.lean"
             proof_path.write_text(proof_text)
             print(f"Proof written to {proof_path}")
+
+            if args.verify:
+                import subprocess as _sp
+
+                print("\nVerifying proof with lake env lean...")
+                ret = _sp.run(
+                    ["lake", "env", "lean", str(proof_path)],
+                    cwd=project_dir,
+                    capture_output=True,
+                    timeout=120,
+                )
+                if ret.returncode == 0:
+                    print("Proof verified by lake build!")
+                else:
+                    print("WARNING: Proof failed lake verification:")
+                    print(ret.stderr.decode(errors="replace"))
 
         sys.exit(0 if result.best_fitness >= 1.0 else 1)
 

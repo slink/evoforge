@@ -41,6 +41,18 @@ theorem_statement = "theorem norm_le_one {φ : ℝ → ℂ} (hφ : IsPositiveDef
 project_dir = "/Users/sglink/Desktop/Projects/LeanLevy"
 repl_path = ""
 imports = "import LeanLevy\nopen ProbabilityTheory ProbabilityTheory.IsPositiveDefinite"
+seeds = [
+  # norm_le_one specific: by_cases on whether φ ξ = 0
+  "by_cases h : φ ξ = 0\n· simp [h]\n· sorry",
+  # Use the PD matrix inequality approach with n=2
+  "have h2 := hφ.sum_nonneg ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)] 2\nsimp at h2\nlinarith",
+  # Apply conj_neg (Hermitian symmetry) then algebraic manipulation
+  "have hsym := hφ.conj_neg ξ\nsimp [h0] at hsym ⊢\nlinarith [norm_nonneg (φ ξ)]",
+  # calc block: 2*‖φ ξ‖ ≤ 2
+  "suffices h : 2 * ‖φ ξ‖ ≤ 2 by linarith\nsorry",
+  # Use norm_sq_le_one if available
+  "have := hφ.norm_sq_le_one h0 ξ\nnlinarith [sq_nonneg ‖φ ξ‖, sq_abs ‖φ ξ‖]",
+]
 
 [evolution]
 max_generations = 200

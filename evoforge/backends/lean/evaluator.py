@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import pty
 import shutil
@@ -19,6 +20,8 @@ from typing import Any, cast
 
 from evoforge.backends.lean.ir import TacticSequence
 from evoforge.core.types import Credit, EvaluationTrace, Fitness
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Goal and step result dataclasses
@@ -353,6 +356,7 @@ class LeanStepwiseEvaluator:
         for i in range(start_index, total_steps):
             step = steps[i]
             resp = await self._repl.send_tactic(step.raw, state=current_state)
+            logger.debug("REPL response for step %d (%s): %s", i, step.raw[:60], resp)
 
             goals_before = list(last_goals)
 
