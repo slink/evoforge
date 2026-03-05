@@ -90,6 +90,24 @@ class SearchMemory:
         # Detect dead ends
         self._detect_dead_ends()
 
+    def record_verification_failure(self, genome: str) -> None:
+        """Record a definitive verification failure as an immediate dead end.
+
+        Unlike normal failure tracking (which requires 3 occurrences), lake
+        verification failure is conclusive — the genome is promoted to
+        dead_ends immediately.
+        """
+        desc = genome.strip()
+        # Ensure failure data has count >= _DEAD_END_COUNT so it persists
+        if desc in self._failure_data:
+            accum = self._failure_data[desc]
+            accum.count = max(accum.count, _DEAD_END_COUNT)
+        else:
+            self._failure_data[desc] = _FailureAccum(count=_DEAD_END_COUNT, last_seen=0)
+        self.dead_ends.add(desc)
+        self._rebuild_failures()
+        self._cap_dead_ends()
+
     def prompt_section(self, max_tokens: int = 500) -> str:
         """Render memory state for inclusion in an LLM prompt.
 
@@ -241,16 +259,15 @@ class SearchMemory:
         self.failures = all_failures[: self.max_failures]
 
     def _detect_dead_ends(self) -> None:
-        """Mark tactic descriptions that have failed >= _DEAD_END_COUNT times.
-
-        Caps the dead_ends set at max_dead_ends, keeping the most frequent.
-        """
+        """Mark tactic descriptions that have failed >= _DEAD_END_COUNT times."""
         for desc, accum in self._failure_data.items():
             if accum.count >= _DEAD_END_COUNT:
                 self.dead_ends.add(desc)
+        self._cap_dead_ends()
 
+    def _cap_dead_ends(self) -> None:
+        """Trim dead_ends to max_dead_ends, keeping the most frequent."""
         if len(self.dead_ends) > self.max_dead_ends:
-            # Keep the most frequent dead ends
             ranked = sorted(
                 self.dead_ends,
                 key=lambda d: self._failure_data.get(d, _FailureAccum(0, 0)).count,

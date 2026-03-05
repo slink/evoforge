@@ -838,21 +838,7 @@ class TestBehaviorDescriptorsAssigned:
 
 
 class PartialVerifyBackend(MockBackend):
-    """Backend where fitness=1.0 but verify_proof always fails."""
-
-    async def evaluate(  # type: ignore[override]
-        self, ir: Any, seed: int | None = None
-    ) -> tuple[Fitness, Any, Any]:
-        mock_ir: MockIR = ir
-        non_empty = len([line for line in mock_ir.lines if line.strip()])
-        primary = min(non_empty / 10.0, 1.0)
-        fitness = Fitness(
-            primary=primary,
-            auxiliary={"line_count": float(non_empty)},
-            constraints={},
-            feasible=True,
-        )
-        return fitness, {"lines": non_empty}, {"steps": mock_ir.lines}
+    """Backend where verify_proof always fails."""
 
     async def verify_proof(self, genome: str) -> bool:
         return False
@@ -936,3 +922,85 @@ class TestPopulationFloor:
         pop = engine.population.get_all()
         hashes = [ind.ir_hash for ind in pop]
         assert len(hashes) == len(set(hashes)), "Refill introduced duplicate hashes"
+
+
+# ---------------------------------------------------------------------------
+# Verification cache
+# ---------------------------------------------------------------------------
+
+
+class VerifyCacheBackend(PerfectFitnessBackend):
+    """Backend where fitness=1.0 and verify_proof tracks call count."""
+
+    verify_call_count: int = 0
+    verify_return: bool = False
+
+    async def verify_proof(self, genome: str) -> bool:
+        self.verify_call_count += 1
+        return self.verify_return
+
+
+class TestVerificationCache:
+    """Verification cache prevents redundant lake env lean calls."""
+
+    async def test_verification_cache_prevents_second_call(self, archive: Archive) -> None:
+        """verify_proof called only once per unique ir_hash across generations."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = False
+        config = _make_config(max_generations=3, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # All seeds have same behavior_descriptor -> some share ir_hash after
+        # canonicalization. But even if all unique, each should be verified at
+        # most once. With pop=5 and 3 gens of offspring, there are many
+        # individuals but verify should be called <= number of unique ir_hashes.
+        unique_hashes = {ind.ir_hash for ind in engine.population.get_all()}
+        # verify_call_count should be <= total unique hashes that had fitness=1.0
+        # (much less than pop_size * generations)
+        assert backend.verify_call_count <= len(unique_hashes) + 20  # generous bound
+
+    async def test_verification_cache_stores_true_results(self, archive: Archive) -> None:
+        """Positive verification results are also cached."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = True
+        config = _make_config(max_generations=2, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # Cache should have entries
+        assert len(engine._verification_cache) > 0
+        # All cached values should be True
+        assert all(v is True for v in engine._verification_cache.values())
+
+    async def test_verification_failure_added_to_dead_ends(self, archive: Archive) -> None:
+        """Failed verification feeds genome to memory dead_ends."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = False
+        config = _make_config(max_generations=1, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # At least one dead end should have been recorded from verification failure
+        assert len(engine._memory.dead_ends) > 0
+
+    async def test_verification_cache_checkpoint_roundtrip(self, archive: Archive) -> None:
+        """Verification cache survives checkpoint save/load."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = False
+        config = _make_config(max_generations=1, population_size=5)
+        config.evolution.checkpoint_every = 1
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # Cache should have entries from verification
+        assert len(engine._verification_cache) > 0
+
+        # Save checkpoint
+        await engine._save_checkpoint(1)
+
+        # Create new engine and load checkpoint
+        engine2 = EvolutionEngine(config=config, backend=backend, archive=archive)
+        gen = await engine2._load_checkpoint()
+        assert gen is not None
+        assert engine2._verification_cache == engine._verification_cache

@@ -370,3 +370,44 @@ def test_memory_to_dict_from_dict_roundtrip() -> None:
         assert p1.description == p2.description
         assert p1.frequency == p2.frequency
         assert abs(p1.avg_fitness - p2.avg_fitness) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# Verification failure recording
+# ---------------------------------------------------------------------------
+
+
+class TestVerificationFailure:
+    def test_verification_failure_immediately_dead_end(self) -> None:
+        """A single record_verification_failure() call adds genome to dead_ends."""
+        mem = SearchMemory()
+        mem.record_verification_failure("norm_num")
+        assert "norm_num" in mem.dead_ends
+
+    def test_verification_failure_appears_in_prompt_section(self) -> None:
+        """Verification failure shows in the 'Dead ends (avoid these)' prompt section."""
+        mem = SearchMemory()
+        mem.record_verification_failure("ring")
+        output = mem.prompt_section()
+        assert "ring" in output
+        assert "Dead ends" in output
+
+    def test_verification_failure_respects_max_dead_ends(self) -> None:
+        """Cap on dead_ends is honored even with many verification failures."""
+        mem = SearchMemory(max_dead_ends=3)
+        for i in range(10):
+            mem.record_verification_failure(f"tactic_{i}")
+        assert len(mem.dead_ends) <= 3
+
+    def test_verification_failure_serialization_roundtrip(self) -> None:
+        """Verification failures survive to_dict/from_dict roundtrip."""
+        mem = SearchMemory()
+        mem.record_verification_failure("norm_num")
+        mem.record_verification_failure("ring")
+
+        data = mem.to_dict()
+        mem2 = SearchMemory()
+        mem2.from_dict(data)
+
+        assert "norm_num" in mem2.dead_ends
+        assert "ring" in mem2.dead_ends

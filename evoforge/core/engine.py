@@ -159,6 +159,7 @@ class EvolutionEngine:
         self._dedup_count: int = 0
         self._total_offspring_attempted: int = 0
         self._start_generation: int = 1
+        self._verification_cache: dict[str, bool] = {}
 
     async def run(self) -> ExperimentResult:
         """Execute the full evolutionary loop and return results."""
@@ -702,6 +703,7 @@ class EvolutionEngine:
             "memory": self._memory.to_dict(),
             "ensemble": self._ensemble.to_dict(),
             "cost_summary": self._scheduler.tracker.summary(),
+            "verification_cache": self._verification_cache,
         }
         await self.archive.store_checkpoint(generation, state)
         logger.info("Checkpoint saved at generation %d", generation)
@@ -732,6 +734,9 @@ class EvolutionEngine:
         # Restore ensemble weights/stats
         self._ensemble.from_dict(data["ensemble"])
 
+        # Restore verification cache
+        self._verification_cache = dict(data.get("verification_cache", {}))
+
         # Restore population from archive by ir_hash (batch lookup)
         pop_hashes: list[str] = data["population_hashes"]
         archived = await self.archive.lookup_many(pop_hashes)
@@ -761,12 +766,18 @@ class EvolutionEngine:
     async def _verify_perfect_individuals(self, individuals: list[Individual]) -> None:
         """Verify fitness=1.0 individuals via backend.verify_proof().
 
-        If verification fails, downgrade fitness to 0.95 so the engine
-        does not falsely claim a proof was found.
+        Uses a cache keyed by ir_hash to avoid redundant verification calls.
+        On failure, records the genome as a dead end in search memory.
         """
         for ind in individuals:
             if ind.fitness is not None and ind.fitness.primary >= 1.0:
-                verified = await self.backend.verify_proof(ind.genome)
+                # Check cache first
+                if ind.ir_hash in self._verification_cache:
+                    verified = self._verification_cache[ind.ir_hash]
+                else:
+                    verified = await self.backend.verify_proof(ind.genome)
+                    self._verification_cache[ind.ir_hash] = verified
+
                 if not verified:
                     logger.warning(
                         "Proof failed verification — marking infeasible: %s",
@@ -778,6 +789,7 @@ class EvolutionEngine:
                         constraints=ind.fitness.constraints,
                         feasible=False,
                     )
+                    self._memory.record_verification_failure(ind.genome)
 
     def _build_result(self, generations_run: int) -> ExperimentResult:
         """Build the final experiment result."""
