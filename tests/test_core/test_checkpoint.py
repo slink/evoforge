@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import patch
 
 from evoforge.core.archive import Archive
@@ -13,9 +14,26 @@ from evoforge.core.config import (
     SelectionConfig,
 )
 from evoforge.core.engine import EvolutionEngine
+from evoforge.core.types import Fitness
 
 # Re-use the real MockBackend from test_engine (proper Backend subclass).
 from tests.test_core.test_engine import MockBackend
+
+
+class _NeverPerfectBackend(MockBackend):
+    """MockBackend that caps fitness at 0.9 so early-exit never triggers."""
+
+    async def evaluate(  # type: ignore[override]
+        self, ir: Any, seed: int | None = None
+    ) -> tuple[Fitness, Any, Any]:
+        fitness, diagnostics, trace = await super().evaluate(ir, seed)
+        capped = Fitness(
+            primary=min(fitness.primary, 0.9),
+            auxiliary=fitness.auxiliary,
+            constraints=fitness.constraints,
+            feasible=fitness.feasible,
+        )
+        return capped, diagnostics, trace
 
 
 def _make_config(
@@ -48,8 +66,8 @@ async def _run_engine(
     config: EvoforgeConfig,
     archive: Archive,
 ) -> EvolutionEngine:
-    """Build and run an engine with the real MockBackend, returning it."""
-    backend = MockBackend()
+    """Build and run an engine with a capped-fitness backend, returning it."""
+    backend = _NeverPerfectBackend()
     engine = EvolutionEngine(
         config=config,
         backend=backend,
@@ -128,7 +146,7 @@ class TestCheckpointLoad:
     async def test_no_checkpoint_returns_none(self, archive: Archive) -> None:
         """_load_checkpoint should return None on a fresh archive."""
         config = _make_config()
-        backend = MockBackend()
+        backend = _NeverPerfectBackend()
         engine = EvolutionEngine(config=config, backend=backend, archive=archive)
 
         result = await engine._load_checkpoint()
@@ -141,7 +159,7 @@ class TestCheckpointLoad:
 
         # Create a fresh engine and load checkpoint
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         start_gen = await engine2._load_checkpoint()
 
@@ -154,7 +172,7 @@ class TestCheckpointLoad:
         original_evals = engine1._total_evaluations
 
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         await engine2._load_checkpoint()
 
@@ -168,7 +186,7 @@ class TestCheckpointLoad:
         original_boost = engine1._temperature_boost
 
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         await engine2._load_checkpoint()
 
@@ -183,7 +201,7 @@ class TestCheckpointLoad:
         assert original_size > 0
 
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         await engine2._load_checkpoint()
 
@@ -198,7 +216,7 @@ class TestCheckpointLoad:
         original_history_len = len(engine1._memory.best_fitness_history)
 
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         await engine2._load_checkpoint()
 
@@ -211,7 +229,7 @@ class TestCheckpointLoad:
         original_dedup = engine1._dedup_count
 
         config2 = _make_config(resume=True)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         await engine2._load_checkpoint()
 
@@ -228,7 +246,7 @@ class TestResumeIntegration:
 
         # Resume with a patched backend to spy on seed_population
         config2 = _make_config(resume=True, max_generations=6)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
 
         with patch.object(backend2, "seed_population", wraps=backend2.seed_population) as spy:
             engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
@@ -242,7 +260,7 @@ class TestResumeIntegration:
         evals_before = engine1._total_evaluations
 
         config2 = _make_config(resume=True, max_generations=8)
-        backend2 = MockBackend()
+        backend2 = _NeverPerfectBackend()
         engine2 = EvolutionEngine(config=config2, backend=backend2, archive=archive)
         result = await engine2.run()
 
@@ -254,7 +272,7 @@ class TestResumeIntegration:
     async def test_resume_no_checkpoint_seeds_normally(self, archive: Archive) -> None:
         """When resume=True but no checkpoint exists, engine seeds normally."""
         config = _make_config(resume=True, max_generations=3, checkpoint_every=3)
-        backend = MockBackend()
+        backend = _NeverPerfectBackend()
 
         with patch.object(backend, "seed_population", wraps=backend.seed_population) as spy:
             engine = EvolutionEngine(config=config, backend=backend, archive=archive)
