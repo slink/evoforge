@@ -17,6 +17,32 @@ _DECL_RE = re.compile(
     r"(theorem|lemma|def)\s+(\w+)\s*(.*)",
 )
 
+# Common Lean/Mathlib types that don't need API enumeration
+_BUILTIN_TYPES = frozenset(
+    {
+        "ℕ",
+        "ℤ",
+        "ℝ",
+        "ℂ",
+        "Nat",
+        "Int",
+        "Float",
+        "Bool",
+        "Prop",
+        "Type",
+        "String",
+        "Fin",
+        "List",
+        "Option",
+        "Unit",
+        "True",
+        "False",
+    }
+)
+
+# Matches (name : Type ...) in theorem signatures
+_HYPO_RE = re.compile(r"\(\w+\s*:\s*([A-Za-z_]\w*)")
+
 _NAMESPACE_RE = re.compile(r"^namespace\s+(\S+)")
 _END_RE = re.compile(r"^end\s+(\S+)")
 
@@ -36,6 +62,18 @@ class APIEntry:
 
     has_sorry: bool = False
     """Whether the proof body contains ``sorry``."""
+
+
+def extract_hypothesis_types(theorem_statement: str) -> list[str]:
+    """Extract non-builtin type names from hypothesis annotations."""
+    matches = _HYPO_RE.findall(theorem_statement)
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in matches:
+        if name not in _BUILTIN_TYPES and name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
 
 
 def extract_api_from_file(file_path: Path, namespace: str) -> list[APIEntry]:

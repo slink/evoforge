@@ -7,7 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from evoforge.backends.lean.api_extractor import APIEntry, extract_api_from_file
+from evoforge.backends.lean.api_extractor import (
+    APIEntry,
+    extract_api_from_file,
+    extract_hypothesis_types,
+)
 
 
 @pytest.fixture
@@ -89,3 +93,24 @@ class TestExtractApi:
         entries = extract_api_from_file(sample_lean_file, "Foo")
         bar = next(e for e in entries if e.name == "bar")
         assert bar.full_name == "Foo.bar"
+
+
+class TestExtractHypothesisTypes:
+    def test_extracts_type_from_hypothesis(self) -> None:
+        stmt = (
+            "theorem norm_le_one {φ : ℝ → ℂ} (hφ : IsPositiveDefinite φ) "
+            "(h0 : φ 0 = 1) (ξ : ℝ) : ‖φ ξ‖ ≤ 1"
+        )
+        assert extract_hypothesis_types(stmt) == ["IsPositiveDefinite"]
+
+    def test_skips_builtin_types(self) -> None:
+        stmt = "theorem foo (n : ℕ) (x : ℝ) (c : ℂ) : n = n"
+        assert extract_hypothesis_types(stmt) == []
+
+    def test_multiple_custom_types(self) -> None:
+        stmt = "theorem bar (hf : Continuous f) (hg : Measurable g) : True"
+        assert extract_hypothesis_types(stmt) == ["Continuous", "Measurable"]
+
+    def test_handles_no_hypotheses(self) -> None:
+        stmt = "theorem trivial_thing : True"
+        assert extract_hypothesis_types(stmt) == []
