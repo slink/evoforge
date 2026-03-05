@@ -44,7 +44,7 @@ class MutationConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM backend configuration and budget limits."""
 
-    model: str = "claude-haiku-4-5-20251001"
+    model: str = "claude-sonnet-4-5-20250929"
     reflection_model: str = "claude-sonnet-4-5-20250929"
     temperature: float = 0.7
     temperature_start: float = 1.0

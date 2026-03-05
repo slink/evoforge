@@ -19,7 +19,7 @@ cheap_weight = 0.4
 crossover_weight = 0.2
 
 [llm]
-model = "claude-haiku-4-5-20251001"
+model = "claude-sonnet-4-5-20250929"
 reflection_model = "claude-sonnet-4-5-20250929"
 temperature = 0.7
 temperature_start = 1.0
