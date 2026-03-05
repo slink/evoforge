@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import time
 from dataclasses import dataclass
 
@@ -46,12 +47,20 @@ class LLMClient:
     def __init__(
         self,
         api_key: str | None = None,
-        max_retries: int = 3,
-        base_delay: float = 1.0,
+        max_retries: int = 6,
+        base_delay: float = 2.0,
+        max_delay: float = 120.0,
     ) -> None:
         self._api_key = api_key
         self._max_retries = max_retries
         self._base_delay = base_delay
+        self._max_delay = max_delay
+
+    def _compute_delay(self, attempt: int) -> float:
+        """Compute retry delay with exponential backoff, jitter, and cap."""
+        delay = self._base_delay * (2**attempt)
+        jitter = random.uniform(0, self._base_delay)
+        return min(delay + jitter, self._max_delay)
 
     def generate(
         self,
@@ -83,7 +92,7 @@ class LLMClient:
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
-                delay = self._base_delay * (2**attempt)
+                delay = self._compute_delay(attempt)
                 logger.warning(
                     "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,
@@ -126,7 +135,7 @@ class LLMClient:
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
-                delay = self._base_delay * (2**attempt)
+                delay = self._compute_delay(attempt)
                 logger.warning(
                     "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,
