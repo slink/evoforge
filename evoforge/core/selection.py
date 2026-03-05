@@ -145,7 +145,9 @@ def _crowding_distance(front: list[Individual]) -> dict[str, float]:
     # Gather objective names
     objectives: list[str] = ["__primary__"]
     if front[0].fitness is not None:
-        objectives += sorted(front[0].fitness.auxiliary.keys())
+        objectives += sorted(
+            k for k, v in front[0].fitness.auxiliary.items() if isinstance(v, (int, float))
+        )
 
     for obj in objectives:
         # Sort by this objective
@@ -154,7 +156,8 @@ def _crowding_distance(front: list[Individual]) -> dict[str, float]:
                 return -math.inf
             if _obj == "__primary__":
                 return ind.fitness.primary
-            return ind.fitness.auxiliary.get(_obj, 0.0)
+            val = ind.fitness.auxiliary.get(_obj, 0.0)
+            return val if isinstance(val, (int, float)) else 0.0
 
         sorted_front = sorted(front, key=_obj_value)
         obj_min = _obj_value(sorted_front[0])
@@ -241,7 +244,9 @@ class Lexicase(SelectionStrategy):
         aux_keys: list[str] = []
         for ind in population:
             if ind.fitness is not None and ind.fitness.auxiliary:
-                aux_keys = list(ind.fitness.auxiliary.keys())
+                aux_keys = [
+                    k for k, v in ind.fitness.auxiliary.items() if isinstance(v, (int, float))
+                ]
                 break
 
         if not aux_keys:
@@ -261,7 +266,8 @@ class Lexicase(SelectionStrategy):
             values: list[float] = []
             for ind in candidates:
                 if ind.fitness is not None:
-                    values.append(ind.fitness.auxiliary.get(case, 0.0))
+                    val = ind.fitness.auxiliary.get(case, 0.0)
+                    values.append(val if isinstance(val, (int, float)) else 0.0)
                 else:
                     values.append(-math.inf)
 

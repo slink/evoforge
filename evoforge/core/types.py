@@ -12,15 +12,22 @@ class Fitness:
     """Fitness value with multi-objective support and constraint tracking."""
 
     primary: float
-    auxiliary: dict[str, float]
+    auxiliary: dict[str, float | str]
     constraints: dict[str, bool]
     feasible: bool
 
     def dominates(self, other: Fitness) -> bool:
         """Pareto dominance: self dominates other iff at least as good on every
         objective AND strictly better on at least one."""
-        all_values_self = [self.primary] + [self.auxiliary[k] for k in sorted(self.auxiliary)]
-        all_values_other = [other.primary] + [other.auxiliary[k] for k in sorted(other.auxiliary)]
+        numeric_keys = sorted(
+            k for k in self.auxiliary if isinstance(self.auxiliary[k], (int, float))
+        )
+        all_values_self = [self.primary] + [
+            v for k in numeric_keys if isinstance((v := self.auxiliary[k]), (int, float))
+        ]
+        all_values_other = [other.primary] + [
+            v for k in numeric_keys if isinstance((v := other.auxiliary.get(k, 0.0)), (int, float))
+        ]
 
         at_least_as_good = all(s >= o for s, o in zip(all_values_self, all_values_other))
         strictly_better_on_one = any(s > o for s, o in zip(all_values_self, all_values_other))

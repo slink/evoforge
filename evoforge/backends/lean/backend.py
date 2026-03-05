@@ -111,6 +111,7 @@ class LeanBackend(Backend):
         repl_path: str | None = None,
         imports: str = "",
         seeds: list[str] | None = None,
+        extra_api_namespaces: list[str] | None = None,
     ) -> None:
         self.theorem_statement = theorem_statement
         self.project_dir = project_dir
@@ -123,6 +124,7 @@ class LeanBackend(Backend):
         self._config_seeds: list[str] = seeds or []
         self._import_env: int | None = None
         self._api_context: list[Any] = []  # populated during startup()
+        self._extra_api_namespaces = extra_api_namespaces or []
 
         self._jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -164,6 +166,24 @@ class LeanBackend(Backend):
         )
         logger.info("Lean REPL started and evaluator initialized")
 
+        # Extract available API from Lean source files
+        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
+
+        try:
+            self._api_context = extract_api_for_theorem(
+                project_dir=Path(self.project_dir),
+                theorem_statement=self.theorem_statement,
+                extra_namespaces=self._extra_api_namespaces,
+            )
+            if self._api_context:
+                logger.info(
+                    "Extracted %d API entries from Lean source files",
+                    len(self._api_context),
+                )
+                self.system_prompt.cache_clear()
+        except Exception:
+            logger.warning("Failed to extract API from Lean sources", exc_info=True)
+
     async def shutdown(self) -> None:
         """Close the Lean REPL process."""
         if self._repl is not None:
@@ -186,12 +206,14 @@ class LeanBackend(Backend):
             fitness, diagnostics, trace = await self._evaluator.evaluate(ir)
 
             # Inline verification for proof-complete results
-            if fitness.primary >= 1.0 and fitness.auxiliary.get("proof_complete", 0.0) >= 1.0:
+            proof_complete = float(fitness.auxiliary.get("proof_complete", 0.0))
+            if fitness.primary >= 1.0 and proof_complete >= 1.0:
                 genome = ir.serialize()
                 cmd_verified, cmd_error = await self._verify_via_repl_cmd(genome)
                 diagnostics.cmd_verification_attempted = True
                 if not cmd_verified:
                     diagnostics.cmd_error_message = cmd_error
+                    error_pattern = self._classify_cmd_error(cmd_error or "unknown")
                     logger.info(
                         "REPL step-by-step said complete but cmd verification failed — "
                         "downgrading to %.1f: %s",
@@ -204,6 +226,7 @@ class LeanBackend(Backend):
                             **fitness.auxiliary,
                             "proof_complete": 0.0,
                             "cmd_verified": 0.0,
+                            "cmd_error_pattern": error_pattern,
                         },
                         constraints=fitness.constraints,
                         feasible=True,

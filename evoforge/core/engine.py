@@ -780,7 +780,7 @@ class EvolutionEngine:
             if (
                 ind.fitness is not None
                 and ind.fitness.primary >= 1.0
-                and ind.fitness.auxiliary.get("cmd_verified", 0.0) >= 1.0
+                and float(ind.fitness.auxiliary.get("cmd_verified", 0.0)) >= 1.0
             ):
                 # Check cache first
                 cache_hit = ind.ir_hash in self._verification_cache
