@@ -51,7 +51,7 @@ class TestVerifyProof:
         assert result is False
 
     async def test_verify_proof_returns_true_on_zero_exit(self, tmp_path: Path) -> None:
-        """verify_proof returns True when lake env lean succeeds."""
+        """verify_proof returns True when lake env lean succeeds with clean stderr."""
         backend = _make_backend(project_dir=str(tmp_path))
         mock_result = MagicMock()
         mock_result.returncode = 0
@@ -60,6 +60,17 @@ class TestVerifyProof:
         with patch("subprocess.run", return_value=mock_result):
             result = await backend.verify_proof("exact rfl")
         assert result is True
+
+    async def test_verify_proof_returns_false_on_sorry_warning(self, tmp_path: Path) -> None:
+        """verify_proof returns False when exit 0 but stderr mentions sorry."""
+        backend = _make_backend(project_dir=str(tmp_path))
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = b"warning: declaration uses 'sorry'\n"
+
+        with patch("subprocess.run", return_value=mock_result):
+            result = await backend.verify_proof("exact norm_le_one")
+        assert result is False
 
     async def test_verify_proof_returns_false_on_exception(self, tmp_path: Path) -> None:
         """verify_proof returns False when subprocess raises."""

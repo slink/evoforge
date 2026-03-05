@@ -59,8 +59,6 @@ _SEED_BANK: list[str] = [
     "ring",
     "omega",
     "positivity",
-    "exact?",
-    "apply?",
     "norm_num\nsimp",
     "push_neg\nsimp",
     "gcongr",
@@ -449,6 +447,13 @@ class LeanBackend(Backend):
                 ),
             )
             if ret.returncode == 0:
+                stderr_text = ret.stderr.decode(errors="replace")
+                if "sorry" in stderr_text.lower():
+                    logger.warning(
+                        "Proof uses sorry transitively — rejecting: %s",
+                        genome[:200],
+                    )
+                    return False
                 logger.info("Proof verified by lake env lean")
                 return True
             else:

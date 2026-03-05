@@ -77,8 +77,6 @@ TACTIC_WHITELIST: frozenset[str] = frozenset(
         "trivial",
         "use",
         "contradiction",
-        "exact?",
-        "apply?",
         "·",
     }
 )
