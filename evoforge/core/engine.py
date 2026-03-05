@@ -301,8 +301,9 @@ class EvolutionEngine:
                         if r is not None:
                             offspring_genomes.append(r)
 
-                    # Identity pipeline + dedup
+                    # Identity pipeline + dedup (include known-bad verification hashes)
                     known_hashes = {ind.ir_hash for ind in pop_list}
+                    known_hashes |= {h for h, v in self._verification_cache.items() if not v}
                     offspring_individuals: list[Individual] = []
                     offspring_lineage: list[tuple[str, str, str]] = []
 
@@ -530,7 +531,12 @@ class EvolutionEngine:
         target: int,
     ) -> None:
         """Evaluate novel individuals and add them to the population up to target size."""
-        novel = [ind for ind in individuals if ind.ir_hash not in existing_hashes]
+        known_bad = {h for h, v in self._verification_cache.items() if not v}
+        novel = [
+            ind
+            for ind in individuals
+            if ind.ir_hash not in existing_hashes and ind.ir_hash not in known_bad
+        ]
         if not novel:
             return
         evaluated = await self._evaluator.evaluate_batch(novel)
@@ -772,24 +778,31 @@ class EvolutionEngine:
         for ind in individuals:
             if ind.fitness is not None and ind.fitness.primary >= 1.0:
                 # Check cache first
-                if ind.ir_hash in self._verification_cache:
+                cache_hit = ind.ir_hash in self._verification_cache
+                if cache_hit:
                     verified = self._verification_cache[ind.ir_hash]
                 else:
                     verified = await self.backend.verify_proof(ind.genome)
                     self._verification_cache[ind.ir_hash] = verified
 
                 if not verified:
-                    logger.warning(
-                        "Proof failed verification — marking infeasible: %s",
-                        ind.genome[:80],
-                    )
+                    if cache_hit:
+                        logger.debug(
+                            "Proof failed verification (cached) — marking infeasible: %s",
+                            ind.genome[:80],
+                        )
+                    else:
+                        logger.warning(
+                            "Proof failed verification — marking infeasible: %s",
+                            ind.genome[:80],
+                        )
+                        self._memory.record_verification_failure(ind.genome)
                     ind.fitness = Fitness(
                         primary=ind.fitness.primary,
                         auxiliary=ind.fitness.auxiliary,
                         constraints=ind.fitness.constraints,
                         feasible=False,
                     )
-                    self._memory.record_verification_failure(ind.genome)
 
     def _build_result(self, generations_run: int) -> ExperimentResult:
         """Build the final experiment result."""

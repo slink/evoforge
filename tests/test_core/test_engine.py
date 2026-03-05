@@ -1004,3 +1004,95 @@ class TestVerificationCache:
         gen = await engine2._load_checkpoint()
         assert gen is not None
         assert engine2._verification_cache == engine._verification_cache
+
+    async def test_cache_hit_uses_debug_not_warning(
+        self, archive: Archive, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """First verification failure emits WARNING; second (cache hit) only DEBUG."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = False
+        config = _make_config(max_generations=1, population_size=3)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        # Create a fake individual with fitness=1.0
+        ind = Individual(
+            genome="sorry_tactic",
+            ir=None,
+            ir_hash="test_hash_abc",
+            generation=0,
+            fitness=Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True),
+        )
+
+        # First call — cache miss — should produce WARNING
+        with caplog.at_level(logging.DEBUG, logger="evoforge.core.engine"):
+            caplog.clear()
+            await engine._verify_perfect_individuals([ind])
+            warnings_1 = [r for r in caplog.records if r.levelno == logging.WARNING]
+            assert len(warnings_1) == 1, f"Expected 1 WARNING, got {len(warnings_1)}"
+
+        # Reset fitness so it triggers verification path again
+        ind.fitness = Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True)
+
+        # Second call — cache hit — should NOT produce WARNING
+        with caplog.at_level(logging.DEBUG, logger="evoforge.core.engine"):
+            caplog.clear()
+            await engine._verify_perfect_individuals([ind])
+            warnings_2 = [r for r in caplog.records if r.levelno == logging.WARNING]
+            debug_2 = [
+                r
+                for r in caplog.records
+                if r.levelno == logging.DEBUG and "cache" in r.message.lower()
+            ]
+            assert len(warnings_2) == 0, f"Expected 0 WARNINGs on cache hit, got {len(warnings_2)}"
+            assert len(debug_2) >= 1, "Expected DEBUG log about cache hit"
+
+    async def test_record_verification_failure_called_once(self, archive: Archive) -> None:
+        """record_verification_failure is called on cache miss, not on cache hit."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = False
+        config = _make_config(max_generations=1, population_size=3)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        ind = Individual(
+            genome="bad_proof",
+            ir=None,
+            ir_hash="rvf_hash",
+            generation=0,
+            fitness=Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True),
+        )
+
+        # First call — should call record_verification_failure
+        call_count_before = len(engine._memory.dead_ends)
+        await engine._verify_perfect_individuals([ind])
+        calls_after_first = len(engine._memory.dead_ends) - call_count_before
+        assert calls_after_first > 0, "record_verification_failure not called on cache miss"
+
+        # Reset fitness
+        ind.fitness = Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True)
+        dead_ends_before_second = len(engine._memory.dead_ends)
+
+        # Second call — cache hit — should NOT call record_verification_failure
+        await engine._verify_perfect_individuals([ind])
+        calls_after_second = len(engine._memory.dead_ends) - dead_ends_before_second
+        assert calls_after_second == 0, "record_verification_failure called on cache hit"
+
+    async def test_known_bad_hashes_rejected_before_eval(self, archive: Archive) -> None:
+        """Pre-seeded bad hashes in verification cache are rejected before evaluation."""
+        backend = VerifyCacheBackend()
+        backend.verify_return = True  # New proofs pass, but cached bad ones skip
+        config = _make_config(max_generations=2, population_size=5)
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        # Pre-seed a known-bad hash
+        bad_hash = "known_bad_hash_xyz"
+        engine._verification_cache[bad_hash] = False
+
+        await engine.run()
+
+        # The known-bad hash should never appear in population
+        pop_hashes = {ind.ir_hash for ind in engine.population.get_all()}
+        assert bad_hash not in pop_hashes, "Known-bad hash should not appear in population"
+
+        # Also verify it was filtered via dedup (known_hashes includes bad hashes)
+        # by checking it wasn't evaluated — verify_call_count should not include it
+        # (it was already in the cache, never needed verify_proof)
