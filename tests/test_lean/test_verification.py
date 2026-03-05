@@ -537,8 +537,8 @@ class TestTwoTierFitness:
         assert fitness.feasible is True
         assert fitness.auxiliary.get("cmd_verified") == 1.0
 
-    async def test_repl_complete_cmd_rejected_gets_0_9(self) -> None:
-        """Proof that passes step-by-step but fails cmd verification gets fitness=0.9."""
+    async def test_repl_complete_cmd_rejected_gets_graduated_score(self) -> None:
+        """Proof that passes step-by-step but fails cmd verification gets graduated fitness."""
         backend = _make_backend(project_dir="/tmp/test")
         mock_evaluator = AsyncMock()
         mock_evaluator.evaluate = AsyncMock(
@@ -564,7 +564,7 @@ class TestTwoTierFitness:
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="ring")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.9)
+        assert fitness.primary == pytest.approx(0.75)
         assert fitness.feasible is True
         assert fitness.auxiliary.get("cmd_verified") == 0.0
 
@@ -594,6 +594,79 @@ class TestTwoTierFitness:
         fitness, _, _ = await backend.evaluate(MagicMock())
         assert fitness.primary == pytest.approx(0.5)
         assert "cmd_verified" not in fitness.auxiliary
+
+
+# ---------------------------------------------------------------------------
+# Graduated cmd-verification scoring
+# ---------------------------------------------------------------------------
+
+
+class TestGraduatedCmdScoring:
+    """False-positive proofs get graduated fitness based on error category."""
+
+    def _make_complete_backend(self, error_msg: str) -> LeanBackend:
+        backend = _make_backend(project_dir="/tmp/test")
+        mock_evaluator = AsyncMock()
+        mock_evaluator.evaluate = AsyncMock(
+            return_value=(
+                Fitness(
+                    primary=1.0,
+                    auxiliary={
+                        "proof_complete": 1.0,
+                        "steps_succeeded": 1.0,
+                        "goals_remaining": 0.0,
+                    },
+                    constraints={},
+                    feasible=True,
+                ),
+                MagicMock(),
+                MagicMock(),
+            )
+        )
+        backend._evaluator = mock_evaluator
+        backend._repl_lock = asyncio.Lock()
+        backend._verify_via_repl_cmd = AsyncMock(return_value=(False, error_msg))  # type: ignore[method-assign]
+        return backend
+
+    @pytest.mark.asyncio
+    async def test_unsolved_goals_gets_0_85(self) -> None:
+        backend = self._make_complete_backend("unsolved goals\n⊢ False")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.85)
+
+    @pytest.mark.asyncio
+    async def test_type_mismatch_gets_0_75(self) -> None:
+        backend = self._make_complete_backend("type mismatch\nexpected Nat")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.75)
+
+    @pytest.mark.asyncio
+    async def test_unknown_identifier_gets_0_60(self) -> None:
+        backend = self._make_complete_backend("unknown identifier 'foo'")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.60)
+
+    @pytest.mark.asyncio
+    async def test_sorry_gets_0_50(self) -> None:
+        backend = self._make_complete_backend("proof contains sorry")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.50)
+
+    @pytest.mark.asyncio
+    async def test_other_error_gets_0_70(self) -> None:
+        backend = self._make_complete_backend("some weird error")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.70)
 
 
 # ---------------------------------------------------------------------------
@@ -797,7 +870,7 @@ class TestEvaluateCmdErrorThreading:
         )
 
         fitness, returned_diag, _ = await backend.evaluate(ir)
-        assert fitness.primary == 0.9
+        assert fitness.primary == pytest.approx(0.60)
         assert returned_diag.cmd_verification_attempted is True
         assert returned_diag.cmd_error_message == "unknown identifier 'sum_nonneg'"
 
