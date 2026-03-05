@@ -43,15 +43,15 @@ repl_path = ""
 imports = "import LeanLevy\nopen ProbabilityTheory ProbabilityTheory.IsPositiveDefinite"
 seeds = [
   # norm_le_one specific: by_cases on whether φ ξ = 0
-  "by_cases h : φ ξ = 0\n· simp [h]\n· sorry",
-  # Use the PD matrix inequality approach with n=2
-  "have h2 := hφ.sum_nonneg ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)] 2\nsimp at h2\nlinarith",
+  "by_cases h : φ ξ = 0\n· simp [h]\n· nlinarith [norm_nonneg (φ ξ)]",
+  # Use the 2x2 PD form: take n=2, x=(0,ξ), c=(1, -φξ/‖φξ‖)
+  "have h2 := hφ 2 ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)]\nsimp [Fin.sum_univ_two, h0] at h2\nlinarith [norm_nonneg (φ ξ)]",
   # Apply conj_neg (Hermitian symmetry) then algebraic manipulation
-  "have hsym := hφ.conj_neg ξ\nsimp [h0] at hsym ⊢\nlinarith [norm_nonneg (φ ξ)]",
-  # calc block: 2*‖φ ξ‖ ≤ 2
-  "suffices h : 2 * ‖φ ξ‖ ≤ 2 by linarith\nsorry",
-  # Use norm_sq_le_one if available
-  "have := hφ.norm_sq_le_one h0 ξ\nnlinarith [sq_nonneg ‖φ ξ‖, sq_abs ‖φ ξ‖]",
+  "have hsym := hφ.conj_neg ξ\nhave h0re := hφ.apply_zero_nonneg\nsimp [h0] at h0re hsym ⊢\nlinarith [norm_nonneg (φ ξ)]",
+  # suffices: reduce to 2*‖φ ξ‖ ≤ 2
+  "suffices h : 2 * ‖φ ξ‖ ≤ 2 by linarith\nnlinarith [hφ.re_nonneg 2 ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)]]",
+  # Direct: use re_nonneg with 2x2 matrix and norm bound
+  "have := hφ.re_nonneg 2 ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)]\nsimp [Fin.sum_univ_two, h0, hφ.conj_neg] at this\nlinarith [norm_nonneg (φ ξ)]",
 ]
 
 [evolution]

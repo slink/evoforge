@@ -19,6 +19,7 @@ TACTIC_WHITELIST: frozenset[str] = frozenset(
         "apply",
         "assumption",
         "bound",
+        "by_cases",
         "by_contra",
         "calc",
         "cases",
@@ -76,6 +77,9 @@ TACTIC_WHITELIST: frozenset[str] = frozenset(
         "trivial",
         "use",
         "contradiction",
+        "exact?",
+        "apply?",
+        "·",
     }
 )
 
@@ -105,6 +109,13 @@ def validate_structure_lean(ir: TacticSequence) -> list[str]:
             # "repeat" is handled separately below, skip whitelist check for it
             if tactic != "repeat":
                 violations.append(f"Unknown tactic: {tactic} is not in the whitelist")
+        # Check for sorry embedded in multi-line blocks (e.g. focused · sorry)
+        if tactic != "sorry":
+            for line in step.raw.split("\n"):
+                word = line.strip().lstrip("· ").split(maxsplit=1)[0] if line.strip() else ""
+                if word == "sorry":
+                    violations.append("Forbidden tactic: sorry embedded in block is not allowed")
+                    break
 
     # --- No unbounded repeat ---
     for step in ir.steps:

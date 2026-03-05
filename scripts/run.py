@@ -117,18 +117,21 @@ def main() -> None:
             if args.verify:
                 import subprocess as _sp
 
-                print("\nVerifying proof with lake env lean...")
-                ret = _sp.run(
-                    ["lake", "env", "lean", str(proof_path)],
-                    cwd=project_dir,
-                    capture_output=True,
-                    timeout=120,
-                )
-                if ret.returncode == 0:
-                    print("Proof verified by lake build!")
+                if "sorry" in result.best_individual.genome:
+                    print("\nWARNING: Proof contains sorry — not a complete proof")
                 else:
-                    print("WARNING: Proof failed lake verification:")
-                    print(ret.stderr.decode(errors="replace"))
+                    print("\nVerifying proof with lake env lean...")
+                    ret = _sp.run(
+                        ["lake", "env", "lean", str(proof_path)],
+                        cwd=project_dir,
+                        capture_output=True,
+                        timeout=120,
+                    )
+                    if ret.returncode == 0:
+                        print("Proof verified by lake build!")
+                    else:
+                        print("WARNING: Proof failed lake verification:")
+                        print(ret.stderr.decode(errors="replace"))
 
         sys.exit(0 if result.best_fitness >= 1.0 else 1)
 

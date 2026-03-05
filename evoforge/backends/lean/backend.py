@@ -66,13 +66,13 @@ _SEED_BANK: list[str] = [
     "gcongr",
     "trivial",
     # --- Multi-step structured proof seeds ---
-    "by_cases h : _ = 0\n· simp [h]\n· sorry",
-    "have h : _ := by sorry\nexact h",
-    "calc _ ≤ _ := by sorry\n  _ = _ := by sorry",
+    "by_cases h : _ = 0\n· simp [h]\n· simp",
+    "have h : _ := by simp\nexact h",
+    "calc _ ≤ _ := by simp\n  _ = _ := by ring",
     "refine le_of_eq ?_\nsimp",
     "rw [norm_le_iff]\nconstructor\n· linarith\n· linarith",
-    "apply norm_le_of_sq_le_sq'\n· positivity\n· sorry",
-    "suffices h : _ by exact h\nsorry",
+    "apply norm_le_of_sq_le_sq'\n· positivity\n· nlinarith",
+    "suffices h : _ by exact h\nsimp",
 ]
 
 # Regex for extracting Lean code blocks from LLM output
@@ -421,6 +421,11 @@ class LeanBackend(Backend):
         invokes the Lean compiler, and returns ``True`` only if compilation
         succeeds (exit code 0).
         """
+        # Reject proofs containing sorry — they compile but aren't real proofs
+        if "sorry" in genome:
+            logger.warning("Proof contains sorry — rejecting without compilation")
+            return False
+
         proof_text = self.format_proof(genome)
         try:
             with tempfile.NamedTemporaryFile(
