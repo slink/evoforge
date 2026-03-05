@@ -188,8 +188,10 @@ class LeanBackend(Backend):
             # Inline verification for proof-complete results
             if fitness.primary >= 1.0 and fitness.auxiliary.get("proof_complete", 0.0) >= 1.0:
                 genome = ir.serialize()
-                cmd_verified, _cmd_error = await self._verify_via_repl_cmd(genome)
+                cmd_verified, cmd_error = await self._verify_via_repl_cmd(genome)
+                diagnostics.cmd_verification_attempted = True
                 if not cmd_verified:
+                    diagnostics.cmd_error_message = cmd_error
                     logger.info(
                         "REPL step-by-step said complete but cmd verification failed — "
                         "downgrading to %.1f: %s",

@@ -752,3 +752,80 @@ class TestApiInSystemPrompt:
         prompt = b.system_prompt()
         assert "Ns.good" in prompt
         assert "Ns.bad" not in prompt
+
+
+# ---------------------------------------------------------------------------
+# evaluate() threads cmd error into diagnostics
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluateCmdErrorThreading:
+    @pytest.fixture
+    def backend(self) -> LeanBackend:
+        b = _make_backend(imports="import LeanLevy")
+        b._repl = AsyncMock()
+        b._repl_lock = asyncio.Lock()
+        b._import_env = 0
+        return b
+
+    async def test_false_positive_stores_cmd_error_on_diagnostics(
+        self, backend: LeanBackend
+    ) -> None:
+        ir = parse_tactic_sequence("simp")
+        complete_fitness = Fitness(
+            primary=1.0,
+            auxiliary={"steps_succeeded": 1.0, "goals_remaining": 0.0, "proof_complete": 1.0},
+            constraints={},
+            feasible=True,
+        )
+        diag = LeanDiagnostics(
+            success=True,
+            goals_remaining=0,
+            goal_types=[],
+            goal_contexts=[],
+            error_type=None,
+            error_message=None,
+            stuck_tactic_index=None,
+            stuck_tactic=None,
+            steps_succeeded=1,
+            metavar_count=0,
+        )
+        backend._evaluator = AsyncMock()
+        backend._evaluator.evaluate = AsyncMock(return_value=(complete_fitness, diag, None))
+        backend._repl.send_command = AsyncMock(
+            return_value={"severity": "error", "message": "unknown identifier 'sum_nonneg'"}
+        )
+
+        fitness, returned_diag, _ = await backend.evaluate(ir)
+        assert fitness.primary == 0.9
+        assert returned_diag.cmd_verification_attempted is True
+        assert returned_diag.cmd_error_message == "unknown identifier 'sum_nonneg'"
+
+    async def test_cmd_success_sets_attempted_no_error(self, backend: LeanBackend) -> None:
+        ir = parse_tactic_sequence("simp")
+        complete_fitness = Fitness(
+            primary=1.0,
+            auxiliary={"steps_succeeded": 1.0, "goals_remaining": 0.0, "proof_complete": 1.0},
+            constraints={},
+            feasible=True,
+        )
+        diag = LeanDiagnostics(
+            success=True,
+            goals_remaining=0,
+            goal_types=[],
+            goal_contexts=[],
+            error_type=None,
+            error_message=None,
+            stuck_tactic_index=None,
+            stuck_tactic=None,
+            steps_succeeded=1,
+            metavar_count=0,
+        )
+        backend._evaluator = AsyncMock()
+        backend._evaluator.evaluate = AsyncMock(return_value=(complete_fitness, diag, None))
+        backend._repl.send_command = AsyncMock(return_value={"env": 42})
+
+        fitness, returned_diag, _ = await backend.evaluate(ir)
+        assert fitness.primary == 1.0
+        assert returned_diag.cmd_verification_attempted is True
+        assert returned_diag.cmd_error_message is None
