@@ -60,7 +60,7 @@ class LLMClient:
         """Compute retry delay with exponential backoff, jitter, and cap."""
         delay = self._base_delay * (2**attempt)
         jitter = random.uniform(0, self._base_delay)
-        return min(delay + jitter, self._max_delay)
+        return float(min(delay + jitter, self._max_delay))
 
     def generate(
         self,
