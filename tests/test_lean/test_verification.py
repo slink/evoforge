@@ -859,3 +859,64 @@ class TestEvaluateCmdErrorThreading:
         assert fitness.primary == 1.0
         assert returned_diag.cmd_verification_attempted is True
         assert returned_diag.cmd_error_message is None
+
+
+# ---------------------------------------------------------------------------
+# Engine: cmd error patterns → SearchMemory dead_ends
+# ---------------------------------------------------------------------------
+
+
+class TestEngineErrorToMemory:
+    def test_cmd_error_pattern_flows_to_dead_ends(self) -> None:
+        """Simulate the engine pattern: extract cmd_error_pattern from auxiliary, add to memory."""
+        from evoforge.core.memory import SearchMemory
+
+        memory = SearchMemory(max_dead_ends=50)
+        ind = make_individual(
+            genome="simp",
+            fitness=Fitness(
+                primary=0.9,
+                auxiliary={
+                    "cmd_verified": 0.0,
+                    "cmd_error_pattern": "unknown_identifier:sum_nonneg",
+                },
+                constraints={},
+                feasible=True,
+            ),
+        )
+        # Simulate what the engine does
+        pattern = ind.fitness.auxiliary.get("cmd_error_pattern")
+        if pattern and isinstance(pattern, str):
+            memory.dead_ends.add(f"cmd_error:{pattern}")
+
+        assert "cmd_error:unknown_identifier:sum_nonneg" in memory.dead_ends
+
+    def test_no_pattern_no_dead_end(self) -> None:
+        """No cmd_error_pattern means no dead end added."""
+        from evoforge.core.memory import SearchMemory
+
+        memory = SearchMemory(max_dead_ends=50)
+        ind = make_individual(
+            genome="simp",
+            fitness=Fitness(
+                primary=1.0,
+                auxiliary={"cmd_verified": 1.0},
+                constraints={},
+                feasible=True,
+            ),
+        )
+        pattern = ind.fitness.auxiliary.get("cmd_error_pattern")
+        if pattern and isinstance(pattern, str):
+            memory.dead_ends.add(f"cmd_error:{pattern}")
+
+        assert len(memory.dead_ends) == 0
+
+    def test_dead_ends_appear_in_prompt_section(self) -> None:
+        """Verify dead ends show up in the memory prompt section."""
+        from evoforge.core.memory import SearchMemory
+
+        memory = SearchMemory(max_dead_ends=50)
+        memory.dead_ends.add("cmd_error:unknown_identifier:sum_nonneg")
+        section = memory.prompt_section()
+        assert "cmd_error:unknown_identifier:sum_nonneg" in section
+        assert "Dead ends" in section

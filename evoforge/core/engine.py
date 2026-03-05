@@ -374,6 +374,12 @@ class EvolutionEngine:
                     # Memory update
                     if not ablation.disable_memory:
                         self._memory.update(credited_offspring, gen)
+                        # Log cmd error patterns to search memory as dead ends
+                        for ind in credited_offspring:
+                            if ind.fitness is not None:
+                                pattern = ind.fitness.auxiliary.get("cmd_error_pattern")
+                                if pattern and isinstance(pattern, str):
+                                    self._memory.dead_ends.add(f"cmd_error:{pattern}")
 
                     # Stagnation check
                     await self._check_stagnation(gen)
