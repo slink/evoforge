@@ -174,3 +174,29 @@ class TestExtractApiForTheorem:
         )
         names = [e.name for e in entries]
         assert "helper" in names
+
+
+class TestStartupApiExtraction:
+    def test_extract_api_for_theorem_with_project(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
+
+        lean_file = tmp_path / "Foo.lean"
+        lean_file.write_text(
+            textwrap.dedent("""\
+            namespace IsPositiveDefinite
+            theorem re_nonneg (n : ℕ) : 0 ≤ n := by omega
+            theorem conj_neg (t : ℝ) : t = t := by rfl
+            theorem norm_le_one (x : ℝ) : True := by
+              sorry
+            end IsPositiveDefinite
+        """)
+        )
+        entries = extract_api_for_theorem(
+            project_dir=tmp_path,
+            theorem_statement="theorem foo (hφ : IsPositiveDefinite φ) : True",
+        )
+        names = [e.name for e in entries]
+        assert "re_nonneg" in names
+        assert "conj_neg" in names
+        sorry_entries = [e for e in entries if e.has_sorry]
+        assert len(sorry_entries) >= 1
