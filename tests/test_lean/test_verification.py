@@ -390,8 +390,9 @@ class TestREPLCmdVerification:
         backend._repl_lock = asyncio.Lock()
         backend._import_env = 0
 
-        result = await backend._verify_via_repl_cmd("exact rfl")
-        assert result is True
+        ok, err = await backend._verify_via_repl_cmd("exact rfl")
+        assert ok is True
+        assert err is None
 
     async def test_verify_via_repl_cmd_failure_on_error(self) -> None:
         """REPL cmd verification returns False on error response."""
@@ -404,8 +405,9 @@ class TestREPLCmdVerification:
         backend._repl_lock = asyncio.Lock()
         backend._import_env = 0
 
-        result = await backend._verify_via_repl_cmd("ring")
-        assert result is False
+        ok, err = await backend._verify_via_repl_cmd("ring")
+        assert ok is False
+        assert err is not None
 
     async def test_verify_via_repl_cmd_failure_on_sorry(self) -> None:
         """REPL cmd verification returns False when sorries present."""
@@ -416,15 +418,17 @@ class TestREPLCmdVerification:
         backend._repl_lock = asyncio.Lock()
         backend._import_env = 0
 
-        result = await backend._verify_via_repl_cmd("sorry")
-        assert result is False
+        ok, err = await backend._verify_via_repl_cmd("sorry")
+        assert ok is False
+        assert err is not None
 
     async def test_verify_via_repl_cmd_no_repl(self) -> None:
         """Returns False when REPL is None."""
         backend = _make_backend()
         backend._repl = None
-        result = await backend._verify_via_repl_cmd("exact rfl")
-        assert result is False
+        ok, err = await backend._verify_via_repl_cmd("exact rfl")
+        assert ok is False
+        assert err is not None
 
     async def test_verify_via_repl_cmd_empty_genome(self) -> None:
         """Returns False for empty genome."""
@@ -432,8 +436,70 @@ class TestREPLCmdVerification:
         mock_repl = AsyncMock()
         backend._repl = mock_repl
         backend._import_env = 0
-        result = await backend._verify_via_repl_cmd("")
-        assert result is False
+        ok, err = await backend._verify_via_repl_cmd("")
+        assert ok is False
+        assert err is not None
+
+
+# ---------------------------------------------------------------------------
+# _verify_via_repl_cmd error messages
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyViaCmdError:
+    async def test_returns_error_message_on_severity_error(self) -> None:
+        """Severity error returns the error message."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(
+            return_value={"message": "type mismatch", "severity": "error"}
+        )
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        ok, err = await backend._verify_via_repl_cmd("simp")
+        assert ok is False
+        assert err == "type mismatch"
+
+    async def test_returns_error_message_on_message_without_env(self) -> None:
+        """Message without env returns the error message."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"message": "unknown identifier 'foo'"})
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        ok, err = await backend._verify_via_repl_cmd("simp")
+        assert ok is False
+        assert err == "unknown identifier 'foo'"
+
+    async def test_returns_none_on_success(self) -> None:
+        """Success returns (True, None)."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"env": 2})
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        ok, err = await backend._verify_via_repl_cmd("exact rfl")
+        assert ok is True
+        assert err is None
+
+    async def test_returns_sorry_message(self) -> None:
+        """Sorries returns (False, 'proof contains sorry')."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"env": 2, "sorries": [{"proofState": 1}]})
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        ok, err = await backend._verify_via_repl_cmd("sorry")
+        assert ok is False
+        assert err == "proof contains sorry"
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +530,7 @@ class TestTwoTierFitness:
         )
         backend._evaluator = mock_evaluator
         backend._repl_lock = asyncio.Lock()
-        backend._verify_via_repl_cmd = AsyncMock(return_value=True)  # type: ignore[method-assign]
+        backend._verify_via_repl_cmd = AsyncMock(return_value=(True, None))  # type: ignore[method-assign]
 
         fitness, _, _ = await backend.evaluate(MagicMock())
         assert fitness.primary == 1.0
@@ -493,7 +559,7 @@ class TestTwoTierFitness:
         )
         backend._evaluator = mock_evaluator
         backend._repl_lock = asyncio.Lock()
-        backend._verify_via_repl_cmd = AsyncMock(return_value=False)  # type: ignore[method-assign]
+        backend._verify_via_repl_cmd = AsyncMock(return_value=(False, "type mismatch"))  # type: ignore[method-assign]
 
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="ring")
@@ -605,9 +671,13 @@ class TestClassifyCmdError:
 
     def test_unknown_identifier_with_context(self) -> None:
         """Extracts identifier from multiline unknown identifier error."""
-        msg = "unknown identifier 'Mathlib.Analysis.Normed.Group.Basic.norm_nonneg'\nsome extra context"
+        msg = (
+            "unknown identifier 'Mathlib.Analysis.Normed.Group.Basic.norm_nonneg'"
+            "\nsome extra context"
+        )
         result = LeanBackend._classify_cmd_error(msg)
-        assert result == "unknown_identifier:Mathlib.Analysis.Normed.Group.Basic.norm_nonneg"
+        ident = "Mathlib.Analysis.Normed.Group.Basic.norm_nonneg"
+        assert result == f"unknown_identifier:{ident}"
 
     def test_type_mismatch(self) -> None:
         """Type mismatch errors are normalized."""
@@ -626,7 +696,59 @@ class TestClassifyCmdError:
 
     def test_fallback(self) -> None:
         """Unknown errors get 'other:' prefix with truncation."""
-        msg = "some completely unknown error that is quite long and should be truncated at sixty characters boundary"
+        msg = (
+            "some completely unknown error that is quite long"
+            " and should be truncated at sixty characters boundary"
+        )
         result = LeanBackend._classify_cmd_error(msg)
         assert result.startswith("other:")
         assert len(result) <= 80
+
+
+# ---------------------------------------------------------------------------
+# API context in system prompt
+# ---------------------------------------------------------------------------
+
+
+class TestApiInSystemPrompt:
+    def test_api_context_rendered_in_system_prompt(self) -> None:
+        from evoforge.backends.lean.api_extractor import APIEntry
+
+        b = _make_backend()
+        b._api_context = [
+            APIEntry(
+                name="re_nonneg",
+                full_name="IsPositiveDefinite.re_nonneg",
+                signature="(n : ℕ) (x : Fin n → ℝ) (c : Fin n → ℂ) : 0 ≤ (∑ ...).re",
+            ),
+            APIEntry(
+                name="conj_neg",
+                full_name="IsPositiveDefinite.conj_neg",
+                signature="(t : ℝ) : φ (-t) = starRingEnd ℂ (φ t)",
+            ),
+        ]
+        b.system_prompt.cache_clear()
+        prompt = b.system_prompt()
+        assert "re_nonneg" in prompt
+        assert "conj_neg" in prompt
+        assert "Available API" in prompt
+
+    def test_empty_api_context_no_section(self) -> None:
+        b = _make_backend()
+        b._api_context = []
+        b.system_prompt.cache_clear()
+        prompt = b.system_prompt()
+        assert "Available API" not in prompt
+
+    def test_sorry_entries_excluded(self) -> None:
+        from evoforge.backends.lean.api_extractor import APIEntry
+
+        b = _make_backend()
+        b._api_context = [
+            APIEntry(name="good", full_name="Ns.good", signature=": True", has_sorry=False),
+            APIEntry(name="bad", full_name="Ns.bad", signature=": True", has_sorry=True),
+        ]
+        b.system_prompt.cache_clear()
+        prompt = b.system_prompt()
+        assert "Ns.good" in prompt
+        assert "Ns.bad" not in prompt

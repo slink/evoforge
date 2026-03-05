@@ -122,6 +122,7 @@ class LeanBackend(Backend):
         self._prefix_cache: dict[str, int] = {}
         self._config_seeds: list[str] = seeds or []
         self._import_env: int | None = None
+        self._api_context: list[Any] = []  # populated during startup()
 
         self._jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -187,7 +188,7 @@ class LeanBackend(Backend):
             # Inline verification for proof-complete results
             if fitness.primary >= 1.0 and fitness.auxiliary.get("proof_complete", 0.0) >= 1.0:
                 genome = ir.serialize()
-                cmd_verified = await self._verify_via_repl_cmd(genome)
+                cmd_verified, _cmd_error = await self._verify_via_repl_cmd(genome)
                 if not cmd_verified:
                     logger.info(
                         "REPL step-by-step said complete but cmd verification failed — "
@@ -258,6 +259,7 @@ class LeanBackend(Backend):
         return template.render(
             theorem_statement=self.theorem_statement,
             math_context=math_context,
+            api_context=self._api_context,
         )
 
     def _derive_math_context(self) -> str:
@@ -491,20 +493,21 @@ class LeanBackend(Backend):
         """Convert 'theorem <name> ...' to 'example ...' for REPL cmd verification."""
         return re.sub(r"^theorem\s+\S+", "example", self.theorem_statement)
 
-    async def _verify_via_repl_cmd(self, genome: str) -> bool:
+    async def _verify_via_repl_cmd(self, genome: str) -> tuple[bool, str | None]:
         """Verify a proof by sending it as a complete cmd to the REPL.
 
         Uses ``example`` instead of ``theorem`` to avoid naming conflicts.
-        Returns True only if the REPL accepts the proof without errors or sorries.
+        Returns ``(True, None)`` on success, or ``(False, error_message)`` on
+        failure.
         """
         if self._repl is None:
-            return False
+            return False, "REPL not started"
 
         # Build the example command preserving indentation
         stmt = self._example_statement()
         body = _reindent_tactics(genome)
         if not body:
-            return False
+            return False, "empty proof body"
         cmd_text = f"{stmt} := by\n{body}"
 
         cmd: dict[str, object] = {"cmd": cmd_text}
@@ -515,20 +518,20 @@ class LeanBackend(Backend):
             resp = await self._repl.send_command(cmd)
         except Exception:
             logger.debug("REPL cmd verification raised an exception", exc_info=True)
-            return False
+            return False, "REPL exception"
 
         # Check for errors
         if "severity" in resp and resp["severity"] == "error":
-            return False
+            return False, str(resp.get("message", "unknown error"))
         if "message" in resp and "env" not in resp:
-            return False
+            return False, str(resp.get("message", "unknown error"))
 
         # Check for sorries
         sorries = resp.get("sorries", [])
         if sorries:
-            return False
+            return False, "proof contains sorry"
 
-        return True
+        return True, None
 
     async def verify_proof(self, genome: str) -> bool:
         """Verify a proof by compiling it with ``lake env lean``.
