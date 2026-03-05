@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -317,3 +318,119 @@ class TestSystemPromptMathContext:
         assert "by_cases" in prompt
         assert "calc" in prompt
         assert "suffices" in prompt
+
+
+# ---------------------------------------------------------------------------
+# format_proof indentation preservation
+# ---------------------------------------------------------------------------
+
+
+class TestFormatProof:
+    def test_preserves_relative_indentation(self) -> None:
+        """format_proof preserves relative indentation for block proofs."""
+        backend = _make_backend(
+            theorem="theorem foo : True",
+            imports="import Mathlib",
+        )
+        genome = "by_cases h : x = 0\n  · simp [h]\n  · ring"
+        result = backend.format_proof(genome)
+        lines = result.strip().split("\n")
+        by_cases_line = [ln for ln in lines if "by_cases" in ln][0]
+        cdot_line = [ln for ln in lines if "·" in ln][0]
+        by_cases_indent = len(by_cases_line) - len(by_cases_line.lstrip())
+        cdot_indent = len(cdot_line) - len(cdot_line.lstrip())
+        assert cdot_indent > by_cases_indent
+
+    def test_flat_tactics_indented_uniformly(self) -> None:
+        """Flat tactics all get 2-space indent under 'by'."""
+        backend = _make_backend(theorem="theorem foo : True")
+        genome = "intro x\nsimp\nring"
+        result = backend.format_proof(genome)
+        tactic_lines = [
+            ln
+            for ln in result.strip().split("\n")
+            if ln.strip() and ":= by" not in ln and "import" not in ln
+        ]
+        for line in tactic_lines:
+            indent = len(line) - len(line.lstrip())
+            assert indent == 2, f"Expected 2-space indent, got {indent}: {line!r}"
+
+    def test_empty_lines_skipped(self) -> None:
+        """Empty lines in genome are skipped."""
+        backend = _make_backend(theorem="theorem foo : True")
+        genome = "intro x\n\nsimp"
+        result = backend.format_proof(genome)
+        assert "\n\n" not in result.split(":= by")[1]
+
+
+# ---------------------------------------------------------------------------
+# REPL cmd verification
+# ---------------------------------------------------------------------------
+
+
+class TestREPLCmdVerification:
+    def test_example_statement_replaces_theorem_name(self) -> None:
+        """_example_statement() replaces 'theorem <name>' with 'example'."""
+        backend = _make_backend(
+            theorem="theorem norm_le_one {φ : ℝ → ℂ} (hφ : IsPositiveDefinite φ) : ‖φ ξ‖ ≤ 1",
+        )
+        result = backend._example_statement()
+        assert result.startswith("example ")
+        assert "norm_le_one" not in result
+        assert "IsPositiveDefinite" in result
+
+    async def test_verify_via_repl_cmd_success(self) -> None:
+        """REPL cmd verification returns True on clean success."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(return_value={"env": 2})
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        result = await backend._verify_via_repl_cmd("exact rfl")
+        assert result is True
+
+    async def test_verify_via_repl_cmd_failure_on_error(self) -> None:
+        """REPL cmd verification returns False on error response."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(
+            return_value={"message": "type mismatch", "severity": "error"}
+        )
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        result = await backend._verify_via_repl_cmd("ring")
+        assert result is False
+
+    async def test_verify_via_repl_cmd_failure_on_sorry(self) -> None:
+        """REPL cmd verification returns False when sorries present."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        mock_repl.send_command = AsyncMock(
+            return_value={"env": 2, "sorries": [{"proofState": 1}]}
+        )
+        backend._repl = mock_repl
+        backend._repl_lock = asyncio.Lock()
+        backend._import_env = 0
+
+        result = await backend._verify_via_repl_cmd("sorry")
+        assert result is False
+
+    async def test_verify_via_repl_cmd_no_repl(self) -> None:
+        """Returns False when REPL is None."""
+        backend = _make_backend()
+        backend._repl = None
+        result = await backend._verify_via_repl_cmd("exact rfl")
+        assert result is False
+
+    async def test_verify_via_repl_cmd_empty_genome(self) -> None:
+        """Returns False for empty genome."""
+        backend = _make_backend()
+        mock_repl = AsyncMock()
+        backend._repl = mock_repl
+        backend._import_env = 0
+        result = await backend._verify_via_repl_cmd("")
+        assert result is False

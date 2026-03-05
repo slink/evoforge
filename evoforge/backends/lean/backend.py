@@ -107,6 +107,7 @@ class LeanBackend(Backend):
         self._repl_lock = asyncio.Lock()
         self._prefix_cache: dict[str, int] = {}
         self._config_seeds: list[str] = seeds or []
+        self._import_env: int | None = None
 
         self._jinja_env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -124,16 +125,15 @@ class LeanBackend(Backend):
         self._repl = LeanREPLProcess(self.project_dir, self.repl_path)
         await self._repl.start()
 
-        # Send user-configured imports and capture the resulting env.
-        # The REPL starts with no environments — the first cmd creates env 0.
-        # Only pass "env" when we have an env from a prior command (e.g. imports).
         theorem_cmd = f"{self.theorem_statement} := by\n sorry"
         init_cmd: dict[str, object] = {"cmd": theorem_cmd}
         if self._imports:
             resp = await self._repl.send_command({"cmd": self._imports})
-            init_cmd["env"] = int(resp.get("env", 0))  # type: ignore[call-overload]
+            self._import_env = int(resp.get("env", 0))  # type: ignore[call-overload]
+            init_cmd["env"] = self._import_env
+        else:
+            self._import_env = None
 
-        # Send theorem initialization and capture the initial proof state
         resp = await self._repl.send_command(init_cmd)
         initial_proof_state = 0
         sorries = resp.get("sorries", [])
@@ -407,10 +407,57 @@ class LeanBackend(Backend):
             lines.append(self._imports)
             lines.append("")
         lines.append(f"{self.theorem_statement} := by")
-        for tactic in genome.strip().split("\n"):
-            if tactic.strip():
-                lines.append(f"  {tactic.strip()}")
+        tactic_lines = [ln for ln in genome.split("\n") if ln.strip()]
+        if tactic_lines:
+            min_indent = min(len(ln) - len(ln.lstrip()) for ln in tactic_lines)
+            for ln in tactic_lines:
+                lines.append("  " + ln[min_indent:])
         return "\n".join(lines) + "\n"
+
+    def _example_statement(self) -> str:
+        """Convert 'theorem <name> ...' to 'example ...' for REPL cmd verification."""
+        return re.sub(r"^theorem\s+\S+", "example", self.theorem_statement)
+
+    async def _verify_via_repl_cmd(self, genome: str) -> bool:
+        """Verify a proof by sending it as a complete cmd to the REPL.
+
+        Uses ``example`` instead of ``theorem`` to avoid naming conflicts.
+        Returns True only if the REPL accepts the proof without errors or sorries.
+        """
+        if self._repl is None:
+            return False
+
+        # Build the example command preserving indentation
+        stmt = self._example_statement()
+        tactic_lines = [ln for ln in genome.split("\n") if ln.strip()]
+        if not tactic_lines:
+            return False
+        min_indent = min(len(ln) - len(ln.lstrip()) for ln in tactic_lines)
+        body = "\n".join("  " + ln[min_indent:] for ln in tactic_lines)
+        cmd_text = f"{stmt} := by\n{body}"
+
+        cmd: dict[str, object] = {"cmd": cmd_text}
+        if self._import_env is not None:
+            cmd["env"] = self._import_env
+
+        try:
+            resp = await self._repl.send_command(cmd)
+        except Exception:
+            logger.debug("REPL cmd verification raised an exception", exc_info=True)
+            return False
+
+        # Check for errors
+        if "severity" in resp and resp["severity"] == "error":
+            return False
+        if "message" in resp and "env" not in resp:
+            return False
+
+        # Check for sorries
+        sorries = resp.get("sorries", [])
+        if sorries:
+            return False
+
+        return True
 
     async def verify_proof(self, genome: str) -> bool:
         """Verify a proof by compiling it with ``lake env lean``.
