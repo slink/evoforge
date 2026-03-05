@@ -81,6 +81,8 @@ class LeanDiagnostics:
     stuck_tactic: str | None
     steps_succeeded: int
     metavar_count: int
+    cmd_verification_attempted: bool = False
+    cmd_error_message: str | None = None
 
     def summary(self, max_tokens: int = 500) -> str:
         """Human-readable summary of the evaluation outcome."""
@@ -100,6 +102,9 @@ class LeanDiagnostics:
                 parts.append(f"Stuck at step {self.stuck_tactic_index}: '{self.stuck_tactic}'")
             if self.goal_types:
                 parts.append(f"Goal types: {', '.join(self.goal_types[:5])}")
+
+        if self.cmd_verification_attempted and self.cmd_error_message:
+            parts.append(f"Cmd verification failed: {self.cmd_error_message}")
 
         text = " ".join(parts)
         # Rough token budget: ~4 chars per token
