@@ -192,6 +192,14 @@ class MockBackend(Backend):
     ) -> str:
         return f"Crossover: {parent_a.genome} + {parent_b.genome}"
 
+    def format_proof(self, genome: str) -> str:
+        lines = ["-- mock proof"]
+        lines.append("theorem mock := by")
+        for tactic in genome.strip().split("\n"):
+            if tactic.strip():
+                lines.append(f"  {tactic.strip()}")
+        return "\n".join(lines) + "\n"
+
 
 # ---------------------------------------------------------------------------
 # Constant-fitness backend for stagnation testing
@@ -699,7 +707,10 @@ class TestEarlyExitOnPerfectFitness:
         config = _make_config(max_generations=20, population_size=5)
         backend = PerfectFitnessBackend()
         engine = EvolutionEngine(
-            config=config, backend=backend, archive=archive, llm_client=None,
+            config=config,
+            backend=backend,
+            archive=archive,
+            llm_client=None,
         )
         result = await engine.run()
 
@@ -709,6 +720,23 @@ class TestEarlyExitOnPerfectFitness:
         )
         assert result.best_fitness >= 1.0
 
+    async def test_best_individual_has_genome_on_perfect_fitness(self, archive: Archive) -> None:
+        """When fitness=1.0, result.best_individual.genome is populated."""
+        config = _make_config(max_generations=5, population_size=5)
+        backend = PerfectFitnessBackend()
+        engine = EvolutionEngine(
+            config=config,
+            backend=backend,
+            archive=archive,
+            llm_client=None,
+        )
+        result = await engine.run()
+
+        assert result.best_fitness >= 1.0
+        assert result.best_individual is not None
+        assert result.best_individual.genome is not None
+        assert len(result.best_individual.genome.strip()) > 0
+
     async def test_logs_early_exit(
         self, archive: Archive, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -716,14 +744,19 @@ class TestEarlyExitOnPerfectFitness:
         config = _make_config(max_generations=10, population_size=5)
         backend = PerfectFitnessBackend()
         engine = EvolutionEngine(
-            config=config, backend=backend, archive=archive, llm_client=None,
+            config=config,
+            backend=backend,
+            archive=archive,
+            llm_client=None,
         )
 
         with caplog.at_level(logging.INFO):
             await engine.run()
 
-        assert any("perfect fitness" in r.message.lower() or "early" in r.message.lower()
-                    for r in caplog.records)
+        assert any(
+            "perfect fitness" in r.message.lower() or "early" in r.message.lower()
+            for r in caplog.records
+        )
 
 
 class TestOperatorNameInLineage:

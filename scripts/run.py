@@ -99,6 +99,15 @@ def main() -> None:
         print(f"Generations: {result.generations_run}")
         print(f"Evaluations: {result.total_evaluations}")
 
+        if result.best_fitness >= 1.0 and result.best_individual is not None:
+            print("\n--- Winning proof ---")
+            print(result.best_individual.genome)
+
+            proof_text = backend.format_proof(result.best_individual.genome)
+            proof_path = output_dir / "proof.lean"
+            proof_path.write_text(proof_text)
+            print(f"Proof written to {proof_path}")
+
         sys.exit(0 if result.best_fitness >= 1.0 else 1)
 
     asyncio.run(_run())

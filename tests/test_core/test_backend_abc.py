@@ -57,6 +57,9 @@ class TestBackendABCMethods:
     def test_has_format_crossover_prompt(self) -> None:
         assert "format_crossover_prompt" in _abstract_method_names(Backend)
 
+    def test_has_format_proof(self) -> None:
+        assert "format_proof" in _abstract_method_names(Backend)
+
     # Existing methods that must remain present:
     @pytest.mark.parametrize(
         "method",
@@ -107,6 +110,12 @@ class TestBackendSignatures:
     def test_default_operator_weights_returns_dict(self) -> None:
         sig = inspect.signature(Backend.default_operator_weights)
         assert sig.return_annotation == "dict[str, float]"
+
+    def test_format_proof_returns_str(self) -> None:
+        sig = inspect.signature(Backend.format_proof)
+        params = list(sig.parameters.keys())
+        assert "genome" in params
+        assert sig.return_annotation == "str"
 
     def test_format_crossover_prompt_takes_two_individuals(self) -> None:
         """format_crossover_prompt must accept parent_a, parent_b, context."""

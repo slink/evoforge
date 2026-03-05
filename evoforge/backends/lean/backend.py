@@ -332,6 +332,18 @@ class LeanBackend(Backend):
             "splice_prefixes": 0.25,
         }
 
+    def format_proof(self, genome: str) -> str:
+        """Wrap tactic genome into a complete, standalone Lean 4 proof."""
+        lines: list[str] = []
+        if self._imports:
+            lines.append(self._imports)
+            lines.append("")
+        lines.append(f"{self.theorem_statement} := by")
+        for tactic in genome.strip().split("\n"):
+            if tactic.strip():
+                lines.append(f"  {tactic.strip()}")
+        return "\n".join(lines) + "\n"
+
     # -- Extra helpers ------------------------------------------------------
 
     def format_crossover_prompt(

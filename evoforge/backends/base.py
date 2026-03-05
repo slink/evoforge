@@ -115,6 +115,11 @@ class Backend(ABC):
         """Return default mutation-operator weights for this domain."""
         ...
 
+    @abstractmethod
+    def format_proof(self, genome: str) -> str:
+        """Format a genome into a complete, standalone proof for this domain."""
+        ...
+
     async def startup(self) -> None:
         """Initialize backend resources (e.g. REPL process). No-op by default."""
 
