@@ -6,6 +6,8 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from evoforge.backends.lean.backend import _SEED_BANK, LeanBackend
 from evoforge.backends.lean.evaluator import LeanDiagnostics
 from evoforge.backends.lean.ir import parse_tactic_sequence
@@ -409,9 +411,7 @@ class TestREPLCmdVerification:
         """REPL cmd verification returns False when sorries present."""
         backend = _make_backend()
         mock_repl = AsyncMock()
-        mock_repl.send_command = AsyncMock(
-            return_value={"env": 2, "sorries": [{"proofState": 1}]}
-        )
+        mock_repl.send_command = AsyncMock(return_value={"env": 2, "sorries": [{"proofState": 1}]})
         backend._repl = mock_repl
         backend._repl_lock = asyncio.Lock()
         backend._import_env = 0
@@ -434,3 +434,97 @@ class TestREPLCmdVerification:
         backend._import_env = 0
         result = await backend._verify_via_repl_cmd("")
         assert result is False
+
+
+# ---------------------------------------------------------------------------
+# Two-tier fitness (inline REPL cmd verification in evaluate)
+# ---------------------------------------------------------------------------
+
+
+class TestTwoTierFitness:
+    async def test_repl_complete_cmd_verified_gets_1_0(self) -> None:
+        """Proof that passes both step-by-step and cmd verification gets fitness=1.0."""
+        backend = _make_backend(project_dir="/tmp/test")
+        mock_evaluator = AsyncMock()
+        mock_evaluator.evaluate = AsyncMock(
+            return_value=(
+                Fitness(
+                    primary=1.0,
+                    auxiliary={
+                        "proof_complete": 1.0,
+                        "steps_succeeded": 1.0,
+                        "goals_remaining": 0.0,
+                    },
+                    constraints={},
+                    feasible=True,
+                ),
+                MagicMock(),
+                MagicMock(),
+            )
+        )
+        backend._evaluator = mock_evaluator
+        backend._repl_lock = asyncio.Lock()
+        backend._verify_via_repl_cmd = AsyncMock(return_value=True)  # type: ignore[method-assign]
+
+        fitness, _, _ = await backend.evaluate(MagicMock())
+        assert fitness.primary == 1.0
+        assert fitness.feasible is True
+        assert fitness.auxiliary.get("cmd_verified") == 1.0
+
+    async def test_repl_complete_cmd_rejected_gets_0_9(self) -> None:
+        """Proof that passes step-by-step but fails cmd verification gets fitness=0.9."""
+        backend = _make_backend(project_dir="/tmp/test")
+        mock_evaluator = AsyncMock()
+        mock_evaluator.evaluate = AsyncMock(
+            return_value=(
+                Fitness(
+                    primary=1.0,
+                    auxiliary={
+                        "proof_complete": 1.0,
+                        "steps_succeeded": 1.0,
+                        "goals_remaining": 0.0,
+                    },
+                    constraints={},
+                    feasible=True,
+                ),
+                MagicMock(),
+                MagicMock(),
+            )
+        )
+        backend._evaluator = mock_evaluator
+        backend._repl_lock = asyncio.Lock()
+        backend._verify_via_repl_cmd = AsyncMock(return_value=False)  # type: ignore[method-assign]
+
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="ring")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.9)
+        assert fitness.feasible is True
+        assert fitness.auxiliary.get("cmd_verified") == 0.0
+
+    async def test_partial_proof_unchanged(self) -> None:
+        """Partial proof (fitness < 1.0) is not affected by verification."""
+        backend = _make_backend(project_dir="/tmp/test")
+        mock_evaluator = AsyncMock()
+        mock_evaluator.evaluate = AsyncMock(
+            return_value=(
+                Fitness(
+                    primary=0.5,
+                    auxiliary={
+                        "proof_complete": 0.0,
+                        "steps_succeeded": 1.0,
+                        "goals_remaining": 1.0,
+                    },
+                    constraints={},
+                    feasible=True,
+                ),
+                MagicMock(),
+                MagicMock(),
+            )
+        )
+        backend._evaluator = mock_evaluator
+        backend._repl_lock = asyncio.Lock()
+
+        fitness, _, _ = await backend.evaluate(MagicMock())
+        assert fitness.primary == pytest.approx(0.5)
+        assert "cmd_verified" not in fitness.auxiliary

@@ -772,11 +772,16 @@ class EvolutionEngine:
     async def _verify_perfect_individuals(self, individuals: list[Individual]) -> None:
         """Verify fitness=1.0 individuals via backend.verify_proof().
 
-        Uses a cache keyed by ir_hash to avoid redundant verification calls.
+        Only runs on individuals that passed REPL cmd verification
+        (cmd_verified=1.0 in auxiliary). Uses a cache keyed by ir_hash.
         On failure, records the genome as a dead end in search memory.
         """
         for ind in individuals:
-            if ind.fitness is not None and ind.fitness.primary >= 1.0:
+            if (
+                ind.fitness is not None
+                and ind.fitness.primary >= 1.0
+                and ind.fitness.auxiliary.get("cmd_verified", 0.0) >= 1.0
+            ):
                 # Check cache first
                 cache_hit = ind.ir_hash in self._verification_cache
                 if cache_hit:

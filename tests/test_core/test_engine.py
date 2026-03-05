@@ -692,7 +692,7 @@ class PerfectFitnessBackend(MockBackend):
     ) -> tuple[Fitness, Any, Any]:
         fitness = Fitness(
             primary=1.0,
-            auxiliary={"proof_complete": 1.0},
+            auxiliary={"proof_complete": 1.0, "cmd_verified": 1.0},
             constraints={},
             feasible=True,
         )
@@ -1014,13 +1014,20 @@ class TestVerificationCache:
         config = _make_config(max_generations=1, population_size=3)
         engine = EvolutionEngine(config=config, backend=backend, archive=archive)
 
-        # Create a fake individual with fitness=1.0
+        # Create a fake individual with fitness=1.0 and cmd_verified=1.0
+        verified_aux = {"cmd_verified": 1.0}
+        perfect = Fitness(
+            primary=1.0,
+            auxiliary=verified_aux,
+            constraints={},
+            feasible=True,
+        )
         ind = Individual(
             genome="sorry_tactic",
             ir=None,
             ir_hash="test_hash_abc",
             generation=0,
-            fitness=Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True),
+            fitness=perfect,
         )
 
         # First call — cache miss — should produce WARNING
@@ -1031,7 +1038,12 @@ class TestVerificationCache:
             assert len(warnings_1) == 1, f"Expected 1 WARNING, got {len(warnings_1)}"
 
         # Reset fitness so it triggers verification path again
-        ind.fitness = Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True)
+        ind.fitness = Fitness(
+            primary=1.0,
+            auxiliary={"cmd_verified": 1.0},
+            constraints={},
+            feasible=True,
+        )
 
         # Second call — cache hit — should NOT produce WARNING
         with caplog.at_level(logging.DEBUG, logger="evoforge.core.engine"):
@@ -1053,12 +1065,18 @@ class TestVerificationCache:
         config = _make_config(max_generations=1, population_size=3)
         engine = EvolutionEngine(config=config, backend=backend, archive=archive)
 
+        verified_aux = {"cmd_verified": 1.0}
         ind = Individual(
             genome="bad_proof",
             ir=None,
             ir_hash="rvf_hash",
             generation=0,
-            fitness=Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True),
+            fitness=Fitness(
+                primary=1.0,
+                auxiliary=verified_aux,
+                constraints={},
+                feasible=True,
+            ),
         )
 
         # First call — should call record_verification_failure
@@ -1068,7 +1086,12 @@ class TestVerificationCache:
         assert calls_after_first > 0, "record_verification_failure not called on cache miss"
 
         # Reset fitness
-        ind.fitness = Fitness(primary=1.0, auxiliary={}, constraints={}, feasible=True)
+        ind.fitness = Fitness(
+            primary=1.0,
+            auxiliary={"cmd_verified": 1.0},
+            constraints={},
+            feasible=True,
+        )
         dead_ends_before_second = len(engine._memory.dead_ends)
 
         # Second call — cache hit — should NOT call record_verification_failure

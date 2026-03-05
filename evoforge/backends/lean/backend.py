@@ -158,11 +158,46 @@ class LeanBackend(Backend):
         logger.info("Lean REPL shut down")
 
     async def evaluate(self, ir: Any, seed: int | None = None) -> tuple[Fitness, Any, Any]:
-        """Evaluate a tactic sequence via the stepwise evaluator."""
+        """Evaluate a tactic sequence via the stepwise evaluator.
+
+        If step-by-step evaluation reports proof complete (fitness=1.0),
+        performs inline REPL cmd verification. Verified proofs keep 1.0;
+        false positives are downgraded to 0.9 (still feasible, preserving
+        gradient signal for the evolutionary search).
+        """
         if self._evaluator is None:
             raise RuntimeError("LeanBackend.startup() must be called before evaluate()")
         async with self._repl_lock:
             fitness, diagnostics, trace = await self._evaluator.evaluate(ir)
+
+            # Inline verification for proof-complete results
+            if fitness.primary >= 1.0 and fitness.auxiliary.get("proof_complete", 0.0) >= 1.0:
+                genome = ir.serialize() if hasattr(ir, "serialize") else str(ir)
+                cmd_verified = await self._verify_via_repl_cmd(genome)
+                if not cmd_verified:
+                    logger.info(
+                        "REPL step-by-step said complete but cmd verification failed — "
+                        "downgrading to 0.9: %s",
+                        genome[:80],
+                    )
+                    fitness = Fitness(
+                        primary=0.9,
+                        auxiliary={
+                            **fitness.auxiliary,
+                            "proof_complete": 0.0,
+                            "cmd_verified": 0.0,
+                        },
+                        constraints=fitness.constraints,
+                        feasible=True,
+                    )
+                else:
+                    fitness = Fitness(
+                        primary=fitness.primary,
+                        auxiliary={**fitness.auxiliary, "cmd_verified": 1.0},
+                        constraints=fitness.constraints,
+                        feasible=fitness.feasible,
+                    )
+
         return fitness, diagnostics, trace
 
     async def evaluate_stepwise(
