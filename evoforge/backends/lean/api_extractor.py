@@ -76,6 +76,46 @@ def extract_hypothesis_types(theorem_statement: str) -> list[str]:
     return result
 
 
+def find_files_with_namespace(project_dir: Path, namespace: str) -> list[Path]:
+    """Find .lean files under project_dir that contain ``namespace <name>``."""
+    pattern = f"namespace {namespace}"
+    results: list[Path] = []
+    for lean_file in project_dir.rglob("*.lean"):
+        try:
+            text = lean_file.read_text(encoding="utf-8")
+            if pattern in text:
+                results.append(lean_file)
+        except (OSError, UnicodeDecodeError):
+            continue
+    return sorted(results)
+
+
+def extract_api_for_theorem(
+    project_dir: Path,
+    theorem_statement: str,
+    extra_namespaces: list[str] | None = None,
+) -> list[APIEntry]:
+    """Extract all relevant API for a theorem, auto-deriving namespaces.
+
+    Combines auto-derived hypothesis types with explicit extra namespaces,
+    then searches the project for matching .lean files and extracts declarations.
+    """
+    namespaces = extract_hypothesis_types(theorem_statement)
+    if extra_namespaces:
+        for ns in extra_namespaces:
+            if ns not in namespaces:
+                namespaces.append(ns)
+
+    all_entries: list[APIEntry] = []
+    for ns in namespaces:
+        files = find_files_with_namespace(project_dir, ns)
+        for f in files:
+            entries = extract_api_from_file(f, ns)
+            all_entries.extend(entries)
+
+    return all_entries
+
+
 def extract_api_from_file(file_path: Path, namespace: str) -> list[APIEntry]:
     """Extract declarations from *file_path* that live in *namespace*.
 

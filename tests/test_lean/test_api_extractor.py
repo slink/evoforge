@@ -114,3 +114,63 @@ class TestExtractHypothesisTypes:
     def test_handles_no_hypotheses(self) -> None:
         stmt = "theorem trivial_thing : True"
         assert extract_hypothesis_types(stmt) == []
+
+
+class TestFindLeanFiles:
+    def test_finds_file_with_namespace(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import find_files_with_namespace
+
+        (tmp_path / "A.lean").write_text("namespace Foo\ntheorem x : True := trivial\nend Foo\n")
+        (tmp_path / "B.lean").write_text("namespace Bar\nend Bar\n")
+        files = find_files_with_namespace(tmp_path, "Foo")
+        assert len(files) == 1
+        assert files[0].name == "A.lean"
+
+    def test_searches_subdirectories(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import find_files_with_namespace
+
+        sub = tmp_path / "Sub"
+        sub.mkdir()
+        (sub / "C.lean").write_text("namespace Foo\nend Foo\n")
+        files = find_files_with_namespace(tmp_path, "Foo")
+        assert len(files) == 1
+
+    def test_returns_empty_when_not_found(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import find_files_with_namespace
+
+        (tmp_path / "A.lean").write_text("namespace Bar\nend Bar\n")
+        files = find_files_with_namespace(tmp_path, "Foo")
+        assert files == []
+
+
+class TestExtractApiForTheorem:
+    def test_end_to_end(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
+
+        lean_file = tmp_path / "Foo.lean"
+        lean_file.write_text(
+            "namespace IsPositiveDefinite\n"
+            "theorem re_nonneg (n : ℕ) : 0 ≤ n := by omega\n"
+            "theorem conj_neg (t : ℝ) : t = t := by rfl\n"
+            "theorem sorry_thing : True := by\n  sorry\n"
+            "end IsPositiveDefinite\n"
+        )
+        entries = extract_api_for_theorem(
+            project_dir=tmp_path,
+            theorem_statement="theorem foo (hφ : IsPositiveDefinite φ) : True",
+        )
+        names = [e.name for e in entries]
+        assert "re_nonneg" in names
+        assert "conj_neg" in names
+
+    def test_extra_namespaces(self, tmp_path: Path) -> None:
+        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
+
+        (tmp_path / "A.lean").write_text("namespace Extra\ndef helper : Nat := 0\nend Extra\n")
+        entries = extract_api_for_theorem(
+            project_dir=tmp_path,
+            theorem_statement="theorem foo : True",
+            extra_namespaces=["Extra"],
+        )
+        names = [e.name for e in entries]
+        assert "helper" in names

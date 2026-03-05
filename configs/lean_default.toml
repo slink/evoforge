@@ -53,6 +53,8 @@ seeds = [
   # Direct: use re_nonneg with 2x2 matrix and norm bound
   "have := hφ.re_nonneg 2 ![0, ξ] ![1, -(φ ξ / ‖φ ξ‖)]\nsimp [Fin.sum_univ_two, h0, hφ.conj_neg] at this\nlinarith [norm_nonneg (φ ξ)]",
 ]
+theorem_file = "LeanLevy/Fourier/PositiveDefinite.lean"
+extra_api_namespaces = []
 
 [evolution]
 max_generations = 200

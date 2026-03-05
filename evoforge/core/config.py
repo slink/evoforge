@@ -73,6 +73,8 @@ class BackendConfig(BaseModel):
     repl_path: str | None = None
     imports: str = ""
     seeds: list[str] = []
+    theorem_file: str | None = None
+    extra_api_namespaces: list[str] = []
 
 
 class EvolutionConfig(BaseModel):
