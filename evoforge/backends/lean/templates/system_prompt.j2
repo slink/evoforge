@@ -8,6 +8,13 @@ Prove the theorem: {{ theorem_statement }}
 {{ math_context }}
 {% endif %}
 
+{% if api_context %}
+## Available API
+The following lemmas, theorems, and definitions are available. Use ONLY these names — do not invent identifiers:
+{% for entry in api_context %}{% if not entry.has_sorry %}- `{{ entry.full_name }}` {{ entry.signature }}
+{% endif %}{% endfor %}
+{% endif %}
+
 ## Proof Strategies
 For inequalities involving norms:
 - Consider `by_cases` on whether the expression is zero
