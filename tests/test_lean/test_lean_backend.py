@@ -196,10 +196,13 @@ class TestLeanBackendFormatCrossoverPrompt:
 
 class TestLeanBackendStartup:
     async def test_startup_sends_import_before_theorem(self) -> None:
-        """startup() should send the import cmd first, then the theorem cmd."""
+        """startup() should send the import cmd first, then the theorem cmd with chained env."""
         mock_repl = MagicMock()
         mock_repl.start = AsyncMock()
-        mock_repl.send_command = AsyncMock(return_value={"sorries": []})
+        # Import returns env=1; theorem init returns sorries with proofState
+        mock_repl.send_command = AsyncMock(
+            side_effect=[{"env": 1}, {"sorries": [{"proofState": 0, "goals": []}]}]
+        )
 
         backend = LeanBackend(
             theorem_statement="theorem T : True",
@@ -216,7 +219,8 @@ class TestLeanBackendStartup:
         assert mock_repl.send_command.await_count == 2
         calls = mock_repl.send_command.call_args_list
         assert calls[0] == call({"cmd": "import LeanLevy"})
-        assert calls[1] == call({"cmd": "theorem T : True := by\n sorry"})
+        # Theorem cmd should use env=1 from the import response
+        assert calls[1] == call({"cmd": "theorem T : True := by\n sorry", "env": 1})
 
     async def test_startup_skips_import_when_empty(self) -> None:
         """startup() should not send an import cmd when imports is empty."""
@@ -233,7 +237,7 @@ class TestLeanBackendStartup:
         with patch.object(backend_mod, "LeanREPLProcess", return_value=mock_repl):
             await backend.startup()
 
-        # Only the theorem init command should be sent
+        # Only the theorem init command should be sent (no env key when no imports)
         assert mock_repl.send_command.await_count == 1
         calls = mock_repl.send_command.call_args_list
         assert calls[0] == call({"cmd": "theorem T : True := by\n sorry"})

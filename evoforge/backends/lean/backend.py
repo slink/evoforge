@@ -37,6 +37,7 @@ from evoforge.core.types import Credit, Fitness, Individual
 # ---------------------------------------------------------------------------
 
 _SEED_BANK: list[str] = [
+    # --- Seeds for theorems where variables need introducing ---
     "intro x\nsimp",
     "intro x\nring",
     "intro x\nnorm_num",
@@ -49,6 +50,19 @@ _SEED_BANK: list[str] = [
     "intro x\nsimp [mul_comm]",
     "intro x\nring_nf\nsimp",
     "intro x\npush_neg\nsimp",
+    # --- Seeds for theorems where variables are already in context ---
+    "simp",
+    "norm_num",
+    "linarith",
+    "ring",
+    "omega",
+    "positivity",
+    "exact?",
+    "apply?",
+    "norm_num\nsimp",
+    "push_neg\nsimp",
+    "gcongr",
+    "trivial",
 ]
 
 # Regex for extracting Lean code blocks from LLM output
@@ -100,18 +114,29 @@ class LeanBackend(Backend):
         self._repl = LeanREPLProcess(self.project_dir, self.repl_path)
         await self._repl.start()
 
-        # Send user-configured imports (e.g. "import LeanLevy")
+        # Send user-configured imports and capture the resulting env.
+        # The REPL starts with no environments — the first cmd creates env 0.
+        # Only pass "env" when we have an env from a prior command (e.g. imports).
+        theorem_cmd = f"{self.theorem_statement} := by\n sorry"
+        init_cmd: dict[str, object] = {"cmd": theorem_cmd}
         if self._imports:
-            import_cmd: dict[str, object] = {"cmd": self._imports}
-            await self._repl.send_command(import_cmd)
+            resp = await self._repl.send_command({"cmd": self._imports})
+            init_cmd["env"] = int(resp.get("env", 0))  # type: ignore[call-overload]
 
-        # Send theorem initialization to verify the REPL is working
-        init_cmd: dict[str, object] = {"cmd": f"{self.theorem_statement} := by\n sorry"}
+        # Send theorem initialization and capture the initial proof state
         resp = await self._repl.send_command(init_cmd)
-        if "sorries" not in resp:
+        initial_proof_state = 0
+        sorries = resp.get("sorries", [])
+        if isinstance(sorries, list) and sorries and "proofState" in sorries[0]:
+            initial_proof_state = int(sorries[0]["proofState"])
+        else:
             logger.warning("REPL init response missing 'sorries': %s", resp)
 
-        self._evaluator = LeanStepwiseEvaluator(self._repl, prefix_cache=self._prefix_cache)
+        self._evaluator = LeanStepwiseEvaluator(
+            self._repl,
+            initial_proof_state=initial_proof_state,
+            prefix_cache=self._prefix_cache,
+        )
         logger.info("Lean REPL started and evaluator initialized")
 
     async def shutdown(self) -> None:

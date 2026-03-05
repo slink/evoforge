@@ -223,6 +223,7 @@ class EvolutionEngine:
             gen_range = range(self._start_generation, max_gen + 1)
 
             rich_handler: logging.Handler | None = None
+            old_handlers: list[logging.Handler] = []
             if progress is not None:
                 progress.start()
                 task_id = progress.add_task("evolving", total=total_gens, status="")
@@ -232,7 +233,13 @@ class EvolutionEngine:
                     show_path=False,
                     show_time=True,
                 )
-                logging.getLogger().addHandler(rich_handler)
+                # Remove plain StreamHandlers (from basicConfig) to prevent
+                # duplicate output; keep other handlers (e.g. pytest caplog).
+                root = logging.getLogger()
+                old_handlers = [h for h in root.handlers if type(h) is logging.StreamHandler]
+                for h in old_handlers:
+                    root.removeHandler(h)
+                root.addHandler(rich_handler)
 
             try:
                 for gen in gen_range:
@@ -398,7 +405,10 @@ class EvolutionEngine:
                         progress.update(task_id, advance=1, status=self._gen_status(gen))
             finally:
                 if rich_handler is not None:
-                    logging.getLogger().removeHandler(rich_handler)
+                    root = logging.getLogger()
+                    root.removeHandler(rich_handler)
+                    for h in old_handlers:
+                        root.addHandler(h)
                 if progress is not None:
                     progress.stop()
         finally:

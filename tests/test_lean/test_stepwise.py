@@ -413,6 +413,74 @@ class TestPrefixCache:
 
 
 # ---------------------------------------------------------------------------
+# Initial proof state tests
+# ---------------------------------------------------------------------------
+
+
+class TestInitialProofState:
+    """Test that the evaluator uses initial_proof_state correctly."""
+
+    async def test_initial_proof_state_used_for_first_tactic(self) -> None:
+        """Evaluator should start from initial_proof_state when no cache hit."""
+        responses: list[dict[str, object]] = [
+            {"proofState": 6, "goals": []},
+        ]
+        repl = MockREPLProcess(responses)
+        evaluator = LeanStepwiseEvaluator(
+            repl=repl,  # type: ignore[arg-type]
+            initial_proof_state=5,
+        )
+
+        seq = TacticSequence(steps=[TacticStep(tactic="trivial", args="", raw="trivial")])
+        fitness, diag, trace = await evaluator.evaluate(seq)
+
+        assert fitness.primary == 1.0
+        assert diag.success is True
+        # Only 1 REPL call (the tactic), no theorem setup call
+        assert repl._call_index == 1
+
+    async def test_cache_hit_overrides_initial_proof_state(self) -> None:
+        """When prefix cache has a hit, its state is used instead of initial_proof_state."""
+        responses: list[dict[str, object]] = [
+            {"proofState": 10, "goals": []},
+        ]
+        repl = MockREPLProcess(responses)
+        cache: dict[str, int] = {"intro x": 7}
+        evaluator = LeanStepwiseEvaluator(
+            repl=repl,  # type: ignore[arg-type]
+            initial_proof_state=5,
+            prefix_cache=cache,
+        )
+
+        seq = TacticSequence(
+            steps=[
+                TacticStep(tactic="intro", args="x", raw="intro x"),
+                TacticStep(tactic="trivial", args="", raw="trivial"),
+            ]
+        )
+
+        fitness, diag, trace = await evaluator.evaluate(seq)
+
+        assert fitness.primary == 1.0
+        # Only 1 call: the new tactic (prefix was cached)
+        assert repl._call_index == 1
+
+    async def test_default_initial_proof_state_is_zero(self) -> None:
+        """Default initial_proof_state=0 preserves backward compatibility."""
+        responses: list[dict[str, object]] = [
+            {"proofState": 1, "goals": []},
+        ]
+        repl = MockREPLProcess(responses)
+        evaluator = LeanStepwiseEvaluator(repl=repl)  # type: ignore[arg-type]
+
+        seq = TacticSequence(steps=[TacticStep(tactic="trivial", args="", raw="trivial")])
+        fitness, diag, trace = await evaluator.evaluate(seq)
+
+        assert fitness.primary == 1.0
+        assert repl._call_index == 1
+
+
+# ---------------------------------------------------------------------------
 # Integration test (requires real Lean REPL)
 # ---------------------------------------------------------------------------
 
@@ -441,17 +509,15 @@ class TestLeanIntegration:
         try:
             await repl.start()
 
-            # Set up a theorem with a sorry to get the initial proof state
-            resp = await repl.send_command({"cmd": "theorem test : 1 + 1 = 2 := by sorry"})
+            # Establish proof context and capture the initial proof state
+            resp = await repl.send_command({"cmd": "theorem test : 1 + 1 = 2 := by\n sorry"})
             assert "sorries" in resp, f"Expected sorries in response: {resp}"
-            sorries = resp["sorries"]
-            assert isinstance(sorries, list) and len(sorries) > 0
-            initial_state = sorries[0]["proofState"]  # type: ignore[index]
-            assert initial_state == 0
+            initial_state = resp["sorries"][0]["proofState"]  # type: ignore[index]
 
-            # Evaluate a tactic sequence that should close the proof
-            # Use 'decide' (built-in, no Mathlib import needed)
-            evaluator = LeanStepwiseEvaluator(repl)
+            evaluator = LeanStepwiseEvaluator(
+                repl,
+                initial_proof_state=initial_state,
+            )
             seq = TacticSequence(steps=[TacticStep(tactic="decide", args="", raw="decide")])
             fitness, diag, _trace = await evaluator.evaluate(seq)
 

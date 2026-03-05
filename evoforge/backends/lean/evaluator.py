@@ -261,19 +261,52 @@ def _prefix_key(steps: list[Any], k: int) -> str:
     return "\n".join(s.raw for s in steps[:k])
 
 
+def _zero_result(
+    trace: LeanEvalTrace,
+    error_type: str | None = None,
+    error_message: str | None = None,
+) -> tuple[Fitness, LeanDiagnostics, LeanEvalTrace]:
+    """Build a zero-fitness result for early-exit cases."""
+    fitness = Fitness(
+        primary=0.0,
+        auxiliary={"steps_succeeded": 0, "goals_remaining": 0, "proof_complete": 0.0},
+        constraints={},
+        feasible=False,
+    )
+    diag = LeanDiagnostics(
+        success=False,
+        goals_remaining=0,
+        goal_types=[],
+        goal_contexts=[],
+        error_type=error_type,
+        error_message=error_message,
+        stuck_tactic_index=None,
+        stuck_tactic=None,
+        steps_succeeded=0,
+        metavar_count=0,
+    )
+    return fitness, diag, trace
+
+
 class LeanStepwiseEvaluator:
     """Evaluates tactic sequences step-by-step against a Lean REPL.
 
     Supports prefix caching: if a prefix of the sequence was already
     evaluated, starts from the cached REPL state instead of the beginning.
+
+    The ``initial_proof_state`` is the REPL proof-state ID obtained by
+    sending the theorem-with-sorry during backend startup.  It is reused
+    across evaluations without re-sending the theorem command.
     """
 
     def __init__(
         self,
         repl: LeanREPLProcess,
+        initial_proof_state: int = 0,
         prefix_cache: dict[str, int] | None = None,
     ) -> None:
         self._repl = repl
+        self._initial_proof_state = initial_proof_state
         self._prefix_cache: dict[str, int] = prefix_cache if prefix_cache is not None else {}
 
     async def evaluate(
@@ -285,29 +318,11 @@ class LeanStepwiseEvaluator:
         trace = LeanEvalTrace(step_results=[])
 
         if total_steps == 0:
-            fitness = Fitness(
-                primary=0.0,
-                auxiliary={"steps_succeeded": 0, "goals_remaining": 0, "proof_complete": 0.0},
-                constraints={},
-                feasible=False,
-            )
-            diag = LeanDiagnostics(
-                success=False,
-                goals_remaining=0,
-                goal_types=[],
-                goal_contexts=[],
-                error_type=None,
-                error_message=None,
-                stuck_tactic_index=None,
-                stuck_tactic=None,
-                steps_succeeded=0,
-                metavar_count=0,
-            )
-            return fitness, diag, trace
+            return _zero_result(trace)
 
         # --- Prefix cache lookup ---
         # Find the longest cached prefix
-        cached_state = 0
+        cached_state = self._initial_proof_state
         start_index = 0
         for k in range(total_steps, 0, -1):
             key = _prefix_key(steps, k)
