@@ -145,9 +145,8 @@ def extract_api_from_file(file_path: Path, namespace: str) -> list[APIEntry]:
             i += 1
             continue
 
-        # Check for declaration.
-        current_ns = ".".join(ns_stack)
-        if current_ns == namespace:
+        # Check for declaration only when inside the target namespace.
+        if ".".join(ns_stack) == namespace:
             decl_match = _DECL_RE.match(stripped)
             if decl_match:
                 name = decl_match.group(2)

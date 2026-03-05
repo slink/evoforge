@@ -15,9 +15,12 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jinja2
+
+if TYPE_CHECKING:
+    from evoforge.backends.lean.api_extractor import APIEntry
 
 from evoforge.backends.base import Backend
 from evoforge.backends.lean.credit import assign_credit_lean
@@ -123,7 +126,7 @@ class LeanBackend(Backend):
         self._prefix_cache: dict[str, int] = {}
         self._config_seeds: list[str] = seeds or []
         self._import_env: int | None = None
-        self._api_context: list[Any] = []  # populated during startup()
+        self._api_context: list[APIEntry] = []  # populated during startup()
         self._extra_api_namespaces = extra_api_namespaces or []
 
         self._jinja_env = jinja2.Environment(
@@ -180,7 +183,6 @@ class LeanBackend(Backend):
                     "Extracted %d API entries from Lean source files",
                     len(self._api_context),
                 )
-                self.system_prompt.cache_clear()
         except Exception:
             logger.warning("Failed to extract API from Lean sources", exc_info=True)
 
@@ -384,7 +386,7 @@ class LeanBackend(Backend):
             return "type_mismatch"
         if msg.startswith("unsolved goals"):
             return "unsolved_goals"
-        if re.search(r"sorry", msg, re.IGNORECASE):
+        if re.search(r"\bsorry\b", msg, re.IGNORECASE):
             return "sorry"
         first_line = msg.split("\n", 1)[0]
         truncated = first_line[:60]

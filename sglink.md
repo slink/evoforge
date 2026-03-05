@@ -116,7 +116,7 @@ Why does this matter? Without it, you would waste evaluation budget testing the
 same proof in different clothing. The identity pipeline is the bouncer at the
 door -- it checks your ID before you enter.
 
-The implementation lives in `/Users/sglink/Desktop/Projects/evoforge/evoforge/core/identity.py`:
+The implementation lives in `evoforge/core/identity.py`:
 
 ```python
 class IdentityPipeline:
@@ -141,8 +141,8 @@ methods on a `Backend` instance:
 - `mutation_operators()` -- what cheap operators are available
 - `behavior_descriptor()` -- classify behavior for MAP-Elites
 
-The full contract is 13 abstract methods defined in
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/backends/base.py`. This is
+The full contract is 20 abstract methods defined in
+`evoforge/backends/base.py`. This is
 the seam between "how evolution works" and "what evolution is evolving." The
 Lean backend implements every method; a future Python backend would implement
 them differently but satisfy the same contract.
@@ -188,16 +188,16 @@ one by one. This is expensive. The system has a **3-level cache**:
   This survives across process restarts because it is on disk.
 
 The caching architecture is split between
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/core/evaluator.py` (L1 + L3
+`evoforge/core/evaluator.py` (L1 + L3
 logic) and
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/backends/lean/evaluator.py`
+`evoforge/backends/lean/evaluator.py`
 (prefix caching at L2).
 
 ---
 
 ## 4. The Core Engine Loop
 
-The engine (`/Users/sglink/Desktop/Projects/evoforge/evoforge/core/engine.py`)
+The engine (`evoforge/core/engine.py`)
 runs a classic evolutionary loop with several non-obvious twists. Let me walk
 through it generation by generation.
 
@@ -207,7 +207,7 @@ through it generation by generation.
 seed_genomes = self.backend.seed_population(self.config.population.size)
 ```
 
-The Lean backend has a hand-written **seed bank** of 12 starter tactic
+The Lean backend has a hand-written **seed bank** of 31 starter tactic
 sequences: things like `intro x / simp`, `intro x / ring`,
 `intro x / norm_num`. These are educated guesses -- the kind of opening moves
 a human would try first. The engine cycles through them to fill the requested
@@ -256,9 +256,9 @@ There are six operators in total:
 | `LLMCrossover` | llm | Ask an LLM to combine two parent proofs |
 
 The cheap operators are defined in
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/backends/lean/operators.py`.
+`evoforge/backends/lean/operators.py`.
 The LLM operators are in
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/llm/operators.py`.
+`evoforge/llm/operators.py`.
 
 Notice how `PrefixTruncation` uses credit analysis: it finds the last tactic
 that got a positive credit score and cuts everything after it. This is like a
@@ -337,8 +337,8 @@ archive size, and whether reflection was triggered.
 ## 5. The Lean Backend -- How Theorem Proving Plugs In
 
 The Lean backend is the first concrete domain implementation. It lives in
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/backends/lean/` and
-implements all 13 abstract methods of the `Backend` ABC. Let me highlight the
+`evoforge/backends/lean/` and
+implements all 20 abstract methods of the `Backend` ABC. Let me highlight the
 most interesting parts.
 
 ### The IR: TacticSequence
@@ -391,7 +391,7 @@ This stepwise approach is crucial for two reasons:
    goals each tactic closed. This powers the credit assignment system.
 
 The evaluator is in
-`/Users/sglink/Desktop/Projects/evoforge/evoforge/backends/lean/evaluator.py`.
+`evoforge/backends/lean/evaluator.py`.
 The REPL communication uses JSON over stdin/stdout -- each command is a
 `{"tactic": "...", "proofState": N}` JSON object, and the response includes
 goals, errors, and the new proof state index.
@@ -428,7 +428,7 @@ individual in each cell, encouraging the population to explore different
 
 ### Seed Bank
 
-The seed bank is a hand-curated list of 12 starter proofs:
+The seed bank is a hand-curated list of 31 starter proofs:
 
 ```python
 _SEED_BANK = [
@@ -547,7 +547,7 @@ in the TOML config.
 
 ### Decision 4: SQLite Archive for Everything
 
-The archive (`/Users/sglink/Desktop/Projects/evoforge/evoforge/core/archive.py`)
+The archive (`evoforge/core/archive.py`)
 uses async SQLAlchemy with aiosqlite to store four kinds of data:
 
 1. **Individuals** -- full genome, IR hash, fitness, behavior descriptor.
@@ -864,7 +864,7 @@ run. After a run completes, you can query the archive to answer questions like:
 This is invaluable for understanding *why* evolution found what it found, not
 just *what* it found.
 
-### Lesson 8: Subprocess Buffering Will Ruin Your Day
+### Lesson 9: Subprocess Buffering Will Ruin Your Day
 
 When we first tried to talk to the Lean REPL interactively from Python, it
 looked dead simple: start `lake env repl`, write JSON to stdin, read JSON from
@@ -905,7 +905,7 @@ I/O and nothing comes back, it is almost certainly buffering.** Use a pty, or
 
 ```bash
 # Clone and enter the project
-cd /Users/sglink/Desktop/Projects/evoforge
+cd evoforge
 
 # Install dependencies with uv
 uv sync
@@ -1148,28 +1148,28 @@ asyncio.run(main())
 
 | File | Purpose | Lines |
 |---|---|---|
-| `evoforge/core/engine.py` | Main evolutionary loop | ~345 |
-| `evoforge/core/types.py` | Core data types (Fitness, Individual, Credit) | ~98 |
-| `evoforge/core/ir.py` | IRProtocol + behavior space config | ~39 |
-| `evoforge/core/config.py` | Pydantic config models + TOML loader | ~100 |
-| `evoforge/core/selection.py` | 4 selection strategies | ~404 |
-| `evoforge/core/mutation.py` | MutationOperator ABC + ensemble | ~175 |
-| `evoforge/core/evaluator.py` | Async evaluator + 3-level cache | ~163 |
-| `evoforge/core/population.py` | Population manager with diversity metrics | ~112 |
-| `evoforge/core/memory.py` | Search memory (patterns, failures, dead ends) | ~230 |
-| `evoforge/core/archive.py` | SQLite archive (individuals, evals, lineage) | ~299 |
-| `evoforge/core/scheduler.py` | Budget + concurrency control | ~89 |
-| `evoforge/core/identity.py` | Parse -> canonicalize -> hash pipeline | ~44 |
-| `evoforge/core/generator.py` | 4-stage validated LLM generation | ~167 |
-| `evoforge/backends/base.py` | Backend ABC (13 abstract methods) | ~86 |
-| `evoforge/backends/lean/backend.py` | LeanBackend facade | ~229 |
-| `evoforge/backends/lean/ir.py` | TacticSequence + TacticStep | ~106 |
-| `evoforge/backends/lean/evaluator.py` | Stepwise REPL evaluator | ~372 |
+| `evoforge/core/engine.py` | Main evolutionary loop | ~833 |
+| `evoforge/core/types.py` | Core data types (Fitness, Individual, Credit) | ~97 |
+| `evoforge/core/ir.py` | IRProtocol + behavior space config | ~38 |
+| `evoforge/core/config.py` | Pydantic config models + TOML loader | ~166 |
+| `evoforge/core/selection.py` | 4 selection strategies | ~408 |
+| `evoforge/core/mutation.py` | MutationOperator ABC + ensemble | ~205 |
+| `evoforge/core/evaluator.py` | Async evaluator + 3-level cache | ~168 |
+| `evoforge/core/population.py` | Population manager with diversity metrics | ~111 |
+| `evoforge/core/memory.py` | Search memory (patterns, failures, dead ends) | ~296 |
+| `evoforge/core/archive.py` | SQLite archive (individuals, evals, lineage) | ~377 |
+| `evoforge/core/scheduler.py` | Budget + concurrency control | ~107 |
+| `evoforge/core/identity.py` | Parse -> canonicalize -> hash pipeline | ~43 |
+| `evoforge/core/generator.py` | 4-stage validated LLM generation | ~166 |
+| `evoforge/backends/base.py` | Backend ABC (20 abstract methods) | ~136 |
+| `evoforge/backends/lean/backend.py` | LeanBackend facade | ~489 |
+| `evoforge/backends/lean/ir.py` | TacticSequence + TacticStep | ~217 |
+| `evoforge/backends/lean/evaluator.py` | Stepwise REPL evaluator | ~441 |
 | `evoforge/backends/lean/operators.py` | 4 cheap mutation operators | ~126 |
-| `evoforge/backends/lean/credit.py` | Per-tactic credit assignment | ~52 |
-| `evoforge/backends/lean/validation.py` | Tactic whitelist + structural checks | ~142 |
-| `evoforge/llm/client.py` | Anthropic API wrapper with retry | ~147 |
-| `evoforge/llm/operators.py` | LLMMutate + LLMCrossover | ~105 |
+| `evoforge/backends/lean/credit.py` | Per-tactic credit assignment | ~51 |
+| `evoforge/backends/lean/validation.py` | Tactic whitelist + structural checks | ~150 |
+| `evoforge/llm/client.py` | Anthropic API wrapper with retry | ~146 |
+| `evoforge/llm/operators.py` | LLMMutate + LLMCrossover | ~106 |
 
 ---
 
@@ -1650,7 +1650,7 @@ positives from the REPL make it a hot path. Caching at the `ir_hash` level
 (not genome string) means that cosmetically different proofs that
 canonicalize to the same IR still share cache entries.
 
-**Test count: 405 → 413.** 8 new tests: 4 for `record_verification_failure()`
+**Test count: 405 → 416.** 8 new tests: 4 for `record_verification_failure()`
 (immediate dead-end, prompt visibility, max cap, serialization roundtrip)
 and 4 for the engine verification cache (prevents redundant calls, caches
-positive results, feeds failures to memory, checkpoint roundtrip).
+positive results, feeds failures to memory, checkpoint roundtrip). 3 more tests cover cache-hit log silencing (DEBUG vs WARNING), redundant `record_verification_failure` prevention, and early rejection of known-bad hashes before evaluation.
