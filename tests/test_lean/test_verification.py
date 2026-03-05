@@ -528,3 +528,105 @@ class TestTwoTierFitness:
         fitness, _, _ = await backend.evaluate(MagicMock())
         assert fitness.primary == pytest.approx(0.5)
         assert "cmd_verified" not in fitness.auxiliary
+
+
+# ---------------------------------------------------------------------------
+# Cmd error diagnostics fields
+# ---------------------------------------------------------------------------
+
+
+class TestCmdErrorDiagnostics:
+    def test_cmd_error_fields_default_none(self) -> None:
+        """New cmd error fields default to False/None."""
+        diag = LeanDiagnostics(
+            success=True,
+            goals_remaining=0,
+            goal_types=[],
+            goal_contexts=[],
+            error_type=None,
+            error_message=None,
+            stuck_tactic_index=None,
+            stuck_tactic=None,
+            steps_succeeded=1,
+            metavar_count=0,
+        )
+        assert diag.cmd_verification_attempted is False
+        assert diag.cmd_error_message is None
+
+    def test_cmd_error_appears_in_summary(self) -> None:
+        """Cmd error message appears in summary when present."""
+        diag = LeanDiagnostics(
+            success=False,
+            goals_remaining=0,
+            goal_types=[],
+            goal_contexts=[],
+            error_type=None,
+            error_message=None,
+            stuck_tactic_index=None,
+            stuck_tactic=None,
+            steps_succeeded=1,
+            metavar_count=0,
+            cmd_verification_attempted=True,
+            cmd_error_message="type mismatch in kernel",
+        )
+        s = diag.summary()
+        assert "Cmd verification failed: type mismatch in kernel" in s
+
+    def test_cmd_success_no_error_in_summary(self) -> None:
+        """No cmd error text when cmd succeeded (no error message)."""
+        diag = LeanDiagnostics(
+            success=True,
+            goals_remaining=0,
+            goal_types=[],
+            goal_contexts=[],
+            error_type=None,
+            error_message=None,
+            stuck_tactic_index=None,
+            stuck_tactic=None,
+            steps_succeeded=1,
+            metavar_count=0,
+            cmd_verification_attempted=True,
+            cmd_error_message=None,
+        )
+        s = diag.summary()
+        assert "Cmd verification failed" not in s
+
+
+# ---------------------------------------------------------------------------
+# _classify_cmd_error
+# ---------------------------------------------------------------------------
+
+
+class TestClassifyCmdError:
+    def test_unknown_identifier(self) -> None:
+        """Extracts identifier name from unknown identifier error."""
+        result = LeanBackend._classify_cmd_error("unknown identifier 'sum_nonneg'")
+        assert result == "unknown_identifier:sum_nonneg"
+
+    def test_unknown_identifier_with_context(self) -> None:
+        """Extracts identifier from multiline unknown identifier error."""
+        msg = "unknown identifier 'Mathlib.Analysis.Normed.Group.Basic.norm_nonneg'\nsome extra context"
+        result = LeanBackend._classify_cmd_error(msg)
+        assert result == "unknown_identifier:Mathlib.Analysis.Normed.Group.Basic.norm_nonneg"
+
+    def test_type_mismatch(self) -> None:
+        """Type mismatch errors are normalized."""
+        result = LeanBackend._classify_cmd_error("type mismatch\nexpected Nat got Int")
+        assert result == "type_mismatch"
+
+    def test_unsolved_goals(self) -> None:
+        """Unsolved goals errors are normalized."""
+        result = LeanBackend._classify_cmd_error("unsolved goals\n⊢ False")
+        assert result == "unsolved_goals"
+
+    def test_sorry(self) -> None:
+        """Sorry-containing messages are normalized."""
+        result = LeanBackend._classify_cmd_error("proof contains sorry")
+        assert result == "sorry"
+
+    def test_fallback(self) -> None:
+        """Unknown errors get 'other:' prefix with truncation."""
+        msg = "some completely unknown error that is quite long and should be truncated at sixty characters boundary"
+        result = LeanBackend._classify_cmd_error(msg)
+        assert result.startswith("other:")
+        assert len(result) <= 80
