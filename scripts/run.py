@@ -73,6 +73,7 @@ def main() -> None:
         repl_path=repl_path,
         imports=config.backend.imports,
         seeds=config.backend.seeds or None,
+        extra_api_namespaces=config.backend.extra_api_namespaces or None,
     )
 
     # Create archive (file-backed SQLite in output dir)
