@@ -23,6 +23,52 @@ from evoforge.core.types import Credit, EvaluationTrace, Fitness
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# Fitness computation
+# ---------------------------------------------------------------------------
+
+
+def _compute_fitness(
+    *,
+    steps_succeeded: int,
+    total_steps: int,
+    initial_goals: int,
+    goals_remaining: int,
+    proof_complete: bool,
+) -> Fitness:
+    """Compute fitness from evaluation outcomes.
+
+    For incomplete proofs:
+        primary = 0.4 * (steps_succeeded / total_steps)
+                + 0.6 * goal_reduction_ratio
+
+    Where goal_reduction_ratio = (initial_goals - goals_remaining) / max(initial_goals, 1)
+    Complete proofs always get 1.0.
+    """
+    if proof_complete:
+        primary = 1.0
+    elif total_steps > 0:
+        step_ratio = steps_succeeded / total_steps
+        goal_reduction = (initial_goals - goals_remaining) / max(initial_goals, 1)
+        goal_reduction = max(0.0, min(1.0, goal_reduction))
+        primary = 0.4 * step_ratio + 0.6 * goal_reduction
+    else:
+        primary = 0.0
+
+    return Fitness(
+        primary=primary,
+        auxiliary={
+            "steps_succeeded": float(steps_succeeded),
+            "goals_remaining": float(goals_remaining),
+            "goal_reduction": float(max(0, initial_goals - goals_remaining)),
+            "proof_complete": 1.0 if proof_complete else 0.0,
+        },
+        constraints={},
+        feasible=proof_complete,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Goal and step result dataclasses
 # ---------------------------------------------------------------------------
@@ -275,11 +321,12 @@ def _zero_result(
     error_message: str | None = None,
 ) -> tuple[Fitness, LeanDiagnostics, LeanEvalTrace]:
     """Build a zero-fitness result for early-exit cases."""
-    fitness = Fitness(
-        primary=0.0,
-        auxiliary={"steps_succeeded": 0, "goals_remaining": 0, "proof_complete": 0.0},
-        constraints={},
-        feasible=False,
+    fitness = _compute_fitness(
+        steps_succeeded=0,
+        total_steps=0,
+        initial_goals=1,
+        goals_remaining=1,
+        proof_complete=False,
     )
     diag = LeanDiagnostics(
         success=False,
@@ -409,25 +456,17 @@ class LeanStepwiseEvaluator:
                 self._prefix_cache[prefix_key] = current_state
 
         # --- Compute results ---
-        goals_remaining = len(last_goals)
+        # When no steps succeed from the initial state, last_goals is empty
+        # but we haven't actually closed any goals — use 1 (the theorem goal).
+        goals_remaining = len(last_goals) if steps_succeeded > 0 else 1
         proof_complete = steps_succeeded == total_steps and goals_remaining == 0
 
-        if proof_complete:
-            primary = 1.0
-        elif total_steps > 0:
-            primary = steps_succeeded / total_steps
-        else:
-            primary = 0.0
-
-        fitness = Fitness(
-            primary=primary,
-            auxiliary={
-                "steps_succeeded": float(steps_succeeded),
-                "goals_remaining": float(goals_remaining),
-                "proof_complete": 1.0 if proof_complete else 0.0,
-            },
-            constraints={},
-            feasible=proof_complete,
+        fitness = _compute_fitness(
+            steps_succeeded=steps_succeeded,
+            total_steps=total_steps,
+            initial_goals=1,  # always one theorem-level goal
+            goals_remaining=goals_remaining,
+            proof_complete=proof_complete,
         )
 
         diag = LeanDiagnostics(

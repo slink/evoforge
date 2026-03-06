@@ -13,6 +13,7 @@ from evoforge.backends.lean.evaluator import (
     LeanEvalTrace,
     LeanStepwiseEvaluator,
     TacticStepResult,
+    _compute_fitness,
 )
 from evoforge.backends.lean.ir import TacticSequence, TacticStep
 from evoforge.core.types import Credit, Diagnostics, EvaluationTrace
@@ -242,9 +243,9 @@ class TestFitnessComputation:
         assert all(r.succeeded for r in trace.step_results)
 
     async def test_partial_success_fraction(self) -> None:
-        """Some tactics succeed, then one fails -> primary = succeeded/total."""
+        """Some tactics succeed, then one fails -> weighted fitness."""
         responses: list[dict[str, object]] = [
-            # Step 1: intro x -> success
+            # Step 1: intro x -> success, 1 goal remaining
             {"proofState": 1, "goals": ["x : Nat\n|- Nat"]},
             # Step 2: exact foo -> failure
             {"message": "unknown identifier 'foo'", "severity": "error"},
@@ -261,7 +262,9 @@ class TestFitnessComputation:
 
         fitness, diag, trace = await evaluator.evaluate(seq)
 
-        assert fitness.primary == pytest.approx(1.0 / 2.0)
+        # 1/2 steps, 1 goal remaining out of 1 initial -> goal_reduction=0
+        # primary = 0.4 * (1/2) + 0.6 * 0.0 = 0.2
+        assert fitness.primary == pytest.approx(0.2)
         assert fitness.auxiliary["proof_complete"] == 0.0
         assert fitness.auxiliary["steps_succeeded"] == 1
         assert diag.success is False
@@ -478,6 +481,83 @@ class TestInitialProofState:
 
         assert fitness.primary == 1.0
         assert repl._call_index == 1
+
+
+# ---------------------------------------------------------------------------
+# Standalone _compute_fitness tests
+# ---------------------------------------------------------------------------
+
+
+class TestComputeFitness:
+    def test_goal_reduction_improves_fitness(self) -> None:
+        """A proof that reduces goals should score higher than one that doesn't."""
+        fitness_good = _compute_fitness(
+            steps_succeeded=3,
+            total_steps=5,
+            initial_goals=3,
+            goals_remaining=1,
+            proof_complete=False,
+        )
+        fitness_bad = _compute_fitness(
+            steps_succeeded=3,
+            total_steps=5,
+            initial_goals=3,
+            goals_remaining=3,
+            proof_complete=False,
+        )
+        assert fitness_good.primary > fitness_bad.primary
+
+    def test_complete_proof_gets_one(self) -> None:
+        """Complete proof should always get 1.0."""
+        f = _compute_fitness(
+            steps_succeeded=3,
+            total_steps=5,
+            initial_goals=1,
+            goals_remaining=0,
+            proof_complete=True,
+        )
+        assert f.primary == 1.0
+        assert f.feasible is True
+
+    def test_zero_steps_gets_zero(self) -> None:
+        """No steps should give 0.0."""
+        f = _compute_fitness(
+            steps_succeeded=0,
+            total_steps=0,
+            initial_goals=1,
+            goals_remaining=1,
+            proof_complete=False,
+        )
+        assert f.primary == 0.0
+
+    def test_formula_values(self) -> None:
+        """Verify the 0.4/0.6 weighting formula."""
+        f = _compute_fitness(
+            steps_succeeded=2,
+            total_steps=4,
+            initial_goals=2,
+            goals_remaining=1,
+            proof_complete=False,
+        )
+        # step_ratio = 2/4 = 0.5, goal_reduction = (2-1)/2 = 0.5
+        # primary = 0.4 * 0.5 + 0.6 * 0.5 = 0.5
+        assert f.primary == pytest.approx(0.5)
+        assert f.auxiliary["goal_reduction"] == 1.0  # 2 - 1 = 1 goal reduced
+        assert f.auxiliary["goals_remaining"] == 1.0
+
+    def test_auxiliary_fields(self) -> None:
+        """Auxiliary dict should contain expected keys."""
+        f = _compute_fitness(
+            steps_succeeded=1,
+            total_steps=3,
+            initial_goals=1,
+            goals_remaining=0,
+            proof_complete=False,
+        )
+        assert "steps_succeeded" in f.auxiliary
+        assert "goals_remaining" in f.auxiliary
+        assert "goal_reduction" in f.auxiliary
+        assert "proof_complete" in f.auxiliary
 
 
 # ---------------------------------------------------------------------------
