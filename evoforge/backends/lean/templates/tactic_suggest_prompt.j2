@@ -1,0 +1,22 @@
+Suggest exactly {{ n }} different Lean 4 tactics to try at this proof state.
+
+## Current Goal
+```
+{{ goal_state }}
+```
+
+## Proof So Far
+```
+{{ proof_so_far }}
+```
+
+## Instructions
+Return {{ n }} distinct tactics, one per line, as a numbered list.
+Each tactic should be a single Lean 4 tactic invocation (not a full proof).
+Prefer diverse approaches — don't suggest minor variations of the same tactic.
+Do NOT use `sorry`.
+
+Example format:
+1. `simp [h0]`
+2. `linarith [norm_nonneg x]`
+3. `exact le_of_eq (by ring)`
