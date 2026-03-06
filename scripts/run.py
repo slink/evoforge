@@ -28,6 +28,11 @@ def main() -> None:
         action="store_true",
         help="Verify winning proof with lake env lean after the run",
     )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Write DEBUG-level logs to this file (console stays at --log-level)",
+    )
     args = parser.parse_args()
 
     # Load config
@@ -50,10 +55,24 @@ def main() -> None:
 
     # Set up logging
     log_level = args.log_level or config.evolution.log_level
-    logging.basicConfig(
-        level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s %(name)s %(levelname)s %(message)s",
-    )
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+
+    # Console handler at user-specified level
+    console = logging.StreamHandler()
+    console.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+    console.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+    root_logger.addHandler(console)
+
+    # File handler at DEBUG if requested
+    if args.log_file:
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
+        )
+        root_logger.addHandler(file_handler)
+
     # Suppress noisy third-party loggers that clash with the rich progress bar
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("anthropic").setLevel(logging.WARNING)
