@@ -1200,3 +1200,117 @@ class TestEnsembleStatsUpdated:
 
         total_apps = sum(s.applications for s in engine._ensemble.stats.values())
         assert total_apps > 0, "Ensemble stats should track operator applications"
+
+
+# ---------------------------------------------------------------------------
+# Reflection parses JSON into memory and temperature
+# ---------------------------------------------------------------------------
+
+
+class _ReflectionLLMResponse:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+
+class _ReflectionLLMClient:
+    """LLM client that returns a configurable reflection JSON."""
+
+    def __init__(self, response_text: str) -> None:
+        self._response_text = response_text
+
+    async def async_generate(self, *args: Any, **kwargs: Any) -> _ReflectionLLMResponse:
+        return _ReflectionLLMResponse(self._response_text)
+
+
+class TestReflectionParsing:
+    """Reflection JSON is parsed and fed into search memory + temperature."""
+
+    async def test_reflection_updates_memory(self, archive: Archive) -> None:
+        """Reflection response should be parsed and fed into search memory."""
+        import json
+
+        reflection_json = json.dumps(
+            {
+                "strategies_to_try": ["use calc blocks"],
+                "strategies_to_avoid": ["avoid sorry"],
+                "useful_primitives": ["norm_nonneg"],
+                "population_diagnosis": "needs diversity",
+                "suggested_temperature": 0.8,
+            }
+        )
+        config = _make_config(max_generations=3, population_size=5)
+        config.reflection = ReflectionConfig(interval=1)
+        backend = MockBackend()
+        llm_client = _ReflectionLLMClient(reflection_json)
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=llm_client
+        )
+        await engine.run()
+
+        assert "avoid sorry" in engine._memory.dead_ends
+        assert any("calc blocks" in p.description for p in engine._memory.patterns)
+        assert any("norm_nonneg" in p.description for p in engine._memory.patterns)
+
+    async def test_reflection_adjusts_temperature(self, archive: Archive) -> None:
+        """Suggested temperature from reflection should influence engine temperature."""
+        import json
+
+        reflection_json = json.dumps(
+            {
+                "strategies_to_try": [],
+                "strategies_to_avoid": [],
+                "useful_primitives": [],
+                "population_diagnosis": "",
+                "suggested_temperature": 1.2,
+            }
+        )
+        config = _make_config(max_generations=2, population_size=5)
+        config.reflection = ReflectionConfig(interval=1)
+        backend = MockBackend()
+        llm_client = _ReflectionLLMClient(reflection_json)
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=llm_client
+        )
+        initial_temp = engine._temperature
+        await engine.run()
+
+        # Temperature should have been nudged toward 1.2
+        assert engine._temperature != initial_temp
+
+    async def test_reflection_handles_markdown_code_block(self, archive: Archive) -> None:
+        """Reflection JSON wrapped in ```json ... ``` should still parse."""
+        import json
+
+        inner = json.dumps(
+            {
+                "strategies_to_try": ["try omega"],
+                "strategies_to_avoid": [],
+                "useful_primitives": [],
+                "population_diagnosis": "",
+                "suggested_temperature": 0.7,
+            }
+        )
+        wrapped = f"Here is my analysis:\n```json\n{inner}\n```"
+        config = _make_config(max_generations=2, population_size=5)
+        config.reflection = ReflectionConfig(interval=1)
+        backend = MockBackend()
+        llm_client = _ReflectionLLMClient(wrapped)
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=llm_client
+        )
+        await engine.run()
+
+        assert any("omega" in p.description for p in engine._memory.patterns)
+
+    async def test_reflection_invalid_json_no_crash(self, archive: Archive) -> None:
+        """Invalid JSON from reflection should not crash the engine."""
+        config = _make_config(max_generations=2, population_size=5)
+        config.reflection = ReflectionConfig(interval=1)
+        backend = MockBackend()
+        llm_client = _ReflectionLLMClient("not valid json {{{")
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=llm_client
+        )
+        # Should not raise
+        result = await engine.run()
+        assert result.generations_run >= 1

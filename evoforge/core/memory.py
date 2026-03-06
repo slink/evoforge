@@ -108,6 +108,29 @@ class SearchMemory:
         self._rebuild_failures()
         self._cap_dead_ends()
 
+    def ingest_reflection(self, reflection: Any) -> None:
+        """Incorporate LLM reflection into memory state.
+
+        - strategies_to_avoid -> dead_ends
+        - strategies_to_try -> patterns (synthetic fitness=0.5)
+        - useful_primitives -> patterns (synthetic fitness=0.3)
+        """
+        for avoid in reflection.strategies_to_avoid:
+            self.dead_ends.add(avoid.strip())
+        self._cap_dead_ends()
+
+        for strategy in reflection.strategies_to_try:
+            desc = strategy.strip()
+            if desc not in self._pattern_data:
+                self._pattern_data[desc] = _PatternAccum(total_fitness=0.5, count=1)
+
+        for primitive in reflection.useful_primitives:
+            desc = primitive.strip()
+            if desc not in self._pattern_data:
+                self._pattern_data[desc] = _PatternAccum(total_fitness=0.3, count=1)
+
+        self._rebuild_patterns()
+
     def prompt_section(self, max_tokens: int = 500) -> str:
         """Render memory state for inclusion in an LLM prompt.
 

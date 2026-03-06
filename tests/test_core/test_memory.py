@@ -411,3 +411,96 @@ class TestVerificationFailure:
 
         assert "norm_num" in mem2.dead_ends
         assert "ring" in mem2.dead_ends
+
+
+# ---------------------------------------------------------------------------
+# Reflection ingestion
+# ---------------------------------------------------------------------------
+
+
+class TestIngestReflection:
+    def test_strategies_to_avoid_become_dead_ends(self) -> None:
+        """strategies_to_avoid entries should be added to dead_ends."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=20)
+        reflection = Reflection(
+            strategies_to_try=["try calc blocks"],
+            strategies_to_avoid=["avoid ring on complex norms"],
+            useful_primitives=["norm_nonneg", "nlinarith"],
+            population_diagnosis="stagnant",
+            suggested_temperature=0.9,
+        )
+        mem.ingest_reflection(reflection)
+        assert "avoid ring on complex norms" in mem.dead_ends
+
+    def test_strategies_to_try_become_patterns(self) -> None:
+        """strategies_to_try entries should appear as patterns with synthetic fitness."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=20)
+        reflection = Reflection(
+            strategies_to_try=["try calc blocks"],
+            strategies_to_avoid=[],
+            useful_primitives=[],
+            population_diagnosis="",
+            suggested_temperature=0.7,
+        )
+        mem.ingest_reflection(reflection)
+        assert any("calc blocks" in p.description for p in mem.patterns)
+
+    def test_useful_primitives_become_patterns(self) -> None:
+        """useful_primitives entries should appear as patterns with lower synthetic fitness."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=20)
+        reflection = Reflection(
+            strategies_to_try=[],
+            strategies_to_avoid=[],
+            useful_primitives=["norm_nonneg"],
+            population_diagnosis="",
+            suggested_temperature=0.7,
+        )
+        mem.ingest_reflection(reflection)
+        assert any("norm_nonneg" in p.description for p in mem.patterns)
+
+    def test_existing_pattern_not_overwritten(self) -> None:
+        """If a pattern already exists, ingest_reflection should not overwrite it."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=20)
+        # Pre-populate via normal update path
+        ind = _make_individual("try calc blocks", primary=0.9, generation=0)
+        mem.update([ind], generation=0)
+        original_fitness = mem.patterns[0].avg_fitness
+
+        reflection = Reflection(
+            strategies_to_try=["try calc blocks"],
+            strategies_to_avoid=[],
+            useful_primitives=[],
+            population_diagnosis="",
+            suggested_temperature=0.7,
+        )
+        mem.ingest_reflection(reflection)
+
+        matching = [p for p in mem.patterns if "calc blocks" in p.description]
+        assert len(matching) == 1
+        assert matching[0].avg_fitness == original_fitness
+
+    def test_full_reflection_integration(self) -> None:
+        """Full reflection with all fields populates dead_ends and patterns."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=20)
+        reflection = Reflection(
+            strategies_to_try=["try calc blocks"],
+            strategies_to_avoid=["avoid ring on complex norms"],
+            useful_primitives=["norm_nonneg", "nlinarith"],
+            population_diagnosis="stagnant",
+            suggested_temperature=0.9,
+        )
+        mem.ingest_reflection(reflection)
+        assert "avoid ring on complex norms" in mem.dead_ends
+        assert any("calc blocks" in p.description for p in mem.patterns)
+        assert any("norm_nonneg" in p.description for p in mem.patterns)
+        assert any("nlinarith" in p.description for p in mem.patterns)

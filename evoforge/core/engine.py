@@ -708,9 +708,8 @@ class EvolutionEngine:
             await self._reflect(generation)
 
     async def _reflect(self, generation: int) -> None:
-        """Call the LLM for a reflection on the current population state."""
+        """Call the LLM for a reflection, parse the result into memory."""
         try:
-            # Limit population to top_k for reflection prompt
             top_k = self.config.reflection.include_top_k
             pop = self.population.best(k=top_k)
             prompt = self.backend.format_reflection_prompt(
@@ -728,8 +727,46 @@ class EvolutionEngine:
                 self.config.llm.max_tokens,
             )
             logger.info("Reflection response received (%d chars)", len(response.text))
+            self._apply_reflection(response.text)
         except Exception:
             logger.warning("Reflection LLM call failed", exc_info=True)
+
+    def _apply_reflection(self, text: str) -> None:
+        """Parse reflection JSON and apply to memory + temperature."""
+        import json as _json
+        import re
+
+        from evoforge.core.types import Reflection
+
+        raw = text.strip()
+        if "```" in raw:
+            match = re.search(r"```(?:json)?\s*\n(.*?)```", raw, re.DOTALL)
+            if match:
+                raw = match.group(1).strip()
+
+        try:
+            data = _json.loads(raw)
+        except _json.JSONDecodeError:
+            logger.debug("Reflection response not valid JSON: %s", text[:200])
+            return
+
+        try:
+            reflection = Reflection(
+                strategies_to_try=data.get("strategies_to_try", []),
+                strategies_to_avoid=data.get("strategies_to_avoid", []),
+                useful_primitives=data.get("useful_primitives", []),
+                population_diagnosis=data.get("population_diagnosis", ""),
+                suggested_temperature=float(data.get("suggested_temperature", self._temperature)),
+            )
+        except (TypeError, ValueError):
+            logger.debug("Reflection response malformed: %s", data)
+            return
+
+        self._memory.ingest_reflection(reflection)
+
+        suggested = reflection.suggested_temperature
+        if 0.1 <= suggested <= 1.5:
+            self._temperature = 0.7 * self._temperature + 0.3 * suggested
 
     async def _save_checkpoint(self, generation: int) -> None:
         """Serialize engine state and store a checkpoint in the archive."""
