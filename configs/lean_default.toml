@@ -61,6 +61,10 @@ max_generations = 200
 stagnation_window = 10
 checkpoint_every = 10
 log_level = "INFO"
+tree_search_enabled = true
+tree_search_max_nodes = 200
+tree_search_beam_width = 5
+tree_search_min_fitness = 0.3
 
 [reflection]
 interval = 10
