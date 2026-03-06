@@ -1119,3 +1119,71 @@ class TestVerificationCache:
         # Also verify it was filtered via dedup (known_hashes includes bad hashes)
         # by checking it wasn't evaluated — verify_call_count should not include it
         # (it was already in the cache, never needed verify_proof)
+
+
+# ---------------------------------------------------------------------------
+# Crossover operators receive guidance_individual
+# ---------------------------------------------------------------------------
+
+
+class MockCrossoverOperator(MutationOperator):
+    """Crossover operator that records whether guidance_individual was set."""
+
+    received_guidance: list[Individual | None] = []
+
+    @property
+    def name(self) -> str:
+        return "mock_crossover"
+
+    @property
+    def cost(self) -> Literal["cheap", "llm"]:
+        return "cheap"
+
+    async def apply(self, parent: Individual, context: MutationContext) -> str:
+        MockCrossoverOperator.received_guidance.append(context.guidance_individual)
+        return parent.genome + f"\ncrossover_{context.generation}"
+
+
+class TestCrossoverGuidanceIndividual:
+    """Engine sets guidance_individual on MutationContext for crossover operators."""
+
+    async def test_crossover_receives_guidance_individual(self, archive: Archive) -> None:
+        """When operator name contains 'crossover', context.guidance_individual is set."""
+        MockCrossoverOperator.received_guidance = []
+
+        config = _make_config(max_generations=1, population_size=5)
+        backend = MockBackend()
+        # Override to return only the crossover operator
+        backend.mutation_operators = lambda: [MockCrossoverOperator()]  # type: ignore[method-assign]
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        # At least one crossover was applied
+        assert len(MockCrossoverOperator.received_guidance) > 0
+        # Every crossover call should have received a non-None guidance_individual
+        for gi in MockCrossoverOperator.received_guidance:
+            assert gi is not None, "crossover operator received None guidance_individual"
+
+    async def test_non_crossover_has_no_guidance_individual(self, archive: Archive) -> None:
+        """Non-crossover operators do NOT receive guidance_individual."""
+        config = _make_config(max_generations=1, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+
+        # Capture contexts from mock operators
+        contexts_seen: list[MutationContext] = []
+        original_apply = MockAppendOperator.apply
+
+        async def spy_apply(self: Any, parent: Individual, context: MutationContext) -> str:
+            contexts_seen.append(context)
+            return await original_apply(self, parent, context)
+
+        MockAppendOperator.apply = spy_apply  # type: ignore[method-assign]
+        try:
+            await engine.run()
+        finally:
+            MockAppendOperator.apply = original_apply  # type: ignore[method-assign]
+
+        # Non-crossover operators should have guidance_individual=None
+        for ctx in contexts_seen:
+            assert ctx.guidance_individual is None

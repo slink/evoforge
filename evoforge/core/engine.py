@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -285,6 +286,15 @@ class EvolutionEngine:
                         if operator.cost == "llm" and not self._scheduler.can_use_llm():
                             operator = self._ensemble.cheapest_operator()
 
+                        # Pick a second parent for crossover operators
+                        guidance_ind = None
+                        if "crossover" in operator.name:
+                            other_parents = [p for p in parents if p.ir_hash != parent.ir_hash]
+                            if other_parents:
+                                guidance_ind = random.choice(other_parents)
+                            else:
+                                guidance_ind = random.choice(parents)
+
                         context = MutationContext(
                             generation=gen,
                             memory=self._memory,
@@ -292,6 +302,7 @@ class EvolutionEngine:
                             temperature=self._temperature,
                             backend=self.backend,
                             credits=parent.credits,
+                            guidance_individual=guidance_ind,
                         )
                         tasks.append(
                             asyncio.create_task(self._mutate_one(parent, operator, context))

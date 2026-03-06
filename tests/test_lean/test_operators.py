@@ -30,6 +30,7 @@ def _make_individual(genome: str) -> Individual:
 def _make_context(
     credits: list[Credit] | None = None,
     guidance: str = "",
+    guidance_individual: Individual | None = None,
 ) -> MutationContext:
     """Create a minimal MutationContext for testing."""
     return MutationContext(
@@ -39,6 +40,7 @@ def _make_context(
         temperature=0.5,
         backend=None,
         credits=credits or [],
+        guidance_individual=guidance_individual,
     )
 
 
@@ -226,6 +228,7 @@ class TestSplicePrefixes:
         genome_a = "intro x\napply h\nsimp\nexact rfl\nskip"
         genome_b = "intro y\napply g\nring\nomega\ndecide"
         parent = _make_individual(genome_a)
+        other = _make_individual(genome_b)
         credits = [
             Credit(location=0, score=1.0, signal="good"),
             Credit(location=1, score=0.5, signal="good"),
@@ -233,7 +236,7 @@ class TestSplicePrefixes:
             Credit(location=3, score=-0.5, signal="bad"),
             Credit(location=4, score=-1.0, signal="bad"),
         ]
-        ctx = _make_context(credits=credits, guidance=genome_b)
+        ctx = _make_context(credits=credits, guidance_individual=other)
 
         op = SplicePrefixes()
         result = await op.apply(parent, ctx)
@@ -251,11 +254,11 @@ class TestSplicePrefixes:
         assert seq.steps[3].tactic == "omega"
         assert seq.steps[4].tactic == "decide"
 
-    async def test_empty_guidance_returns_parent_unchanged(self) -> None:
-        """Empty guidance returns parent unchanged."""
+    async def test_no_guidance_individual_returns_parent_unchanged(self) -> None:
+        """No guidance_individual returns parent unchanged."""
         genome = "intro x\napply h\nsimp"
         parent = _make_individual(genome)
-        ctx = _make_context(credits=[], guidance="")
+        ctx = _make_context(credits=[])
 
         op = SplicePrefixes()
         result = await op.apply(parent, ctx)
@@ -267,12 +270,13 @@ class TestSplicePrefixes:
         genome_a = "intro x\napply h\nsimp"
         genome_b = "intro y\nring\nomega"
         parent = _make_individual(genome_a)
+        other = _make_individual(genome_b)
         credits = [
             Credit(location=0, score=-1.0, signal="bad"),
             Credit(location=1, score=-0.5, signal="bad"),
             Credit(location=2, score=-1.0, signal="bad"),
         ]
-        ctx = _make_context(credits=credits, guidance=genome_b)
+        ctx = _make_context(credits=credits, guidance_individual=other)
 
         op = SplicePrefixes()
         result = await op.apply(parent, ctx)

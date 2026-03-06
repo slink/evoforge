@@ -111,11 +111,13 @@ class SplicePrefixes(MutationOperator):
         return "cheap"
 
     async def apply(self, parent: Individual, context: MutationContext) -> str:
-        if not context.guidance:
+        if context.guidance_individual is not None:
+            other_genome = context.guidance_individual.genome
+        else:
             return parent.genome
 
         seq_a = parse_tactic_sequence(parent.genome)
-        seq_b = parse_tactic_sequence(context.guidance)
+        seq_b = parse_tactic_sequence(other_genome)
         if seq_a is None or seq_b is None:
             return parent.genome
 
@@ -123,4 +125,6 @@ class SplicePrefixes(MutationOperator):
         prefix_steps = seq_a.steps[:keep]
         suffix_steps = seq_b.steps[keep:]
         merged = prefix_steps + suffix_steps
+        if not merged:
+            return parent.genome
         return TacticSequence(steps=merged).serialize()
