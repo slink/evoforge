@@ -151,13 +151,11 @@ class SearchMemory:
                 lines.append(line)
             parts.append("\n".join(lines))
 
-        # Dead ends
+        # Dead ends (grouped by category)
         if self.dead_ends:
-            dead_list = sorted(self.dead_ends)[:10]
-            lines = ["Dead ends (avoid these):"]
-            for d in dead_list:
-                lines.append(f"  - {d}")
-            parts.append("\n".join(lines))
+            formatted = self.format_dead_ends()
+            if formatted:
+                parts.append("Dead ends (avoid these):\n" + formatted)
 
         # Credit aggregates
         if self.credit_aggregates:
@@ -183,6 +181,41 @@ class SearchMemory:
             result = result[:max_chars]
 
         return result
+
+    def format_dead_ends(self) -> str:
+        """Format dead ends grouped by category for LLM consumption."""
+        if not self.dead_ends:
+            return ""
+
+        unknown_ids: list[str] = []
+        other_cmd: list[str] = []
+        freeform: list[str] = []
+
+        for d in sorted(self.dead_ends):
+            if d.startswith("cmd_error:unknown_identifier:"):
+                ident = d.split(":", 2)[2]
+                unknown_ids.append(ident)
+            elif d.startswith("cmd_error:"):
+                category = d.split(":", 1)[1]
+                other_cmd.append(category)
+            else:
+                freeform.append(d)
+
+        lines: list[str] = []
+
+        if unknown_ids:
+            names = ", ".join(f"`{n}`" for n in sorted(unknown_ids))
+            lines.append(f"These identifiers do not exist — do not use them: {names}")
+
+        if other_cmd:
+            for cat in sorted(set(other_cmd)):
+                lines.append(f"Proofs with {cat.replace('_', ' ')} errors failed verification")
+
+        if freeform:
+            for d in freeform[:10]:
+                lines.append(f"Avoid: {d}")
+
+        return "\n".join(lines)
 
     def is_stagnant(self) -> bool:
         """Return True if best fitness hasn't improved for stagnation_window generations."""

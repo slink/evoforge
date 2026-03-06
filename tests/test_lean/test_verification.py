@@ -1069,5 +1069,6 @@ class TestEngineErrorToMemory:
         memory = SearchMemory(max_dead_ends=50)
         memory.dead_ends.add("cmd_error:unknown_identifier:sum_nonneg")
         section = memory.prompt_section()
-        assert "cmd_error:unknown_identifier:sum_nonneg" in section
+        assert "sum_nonneg" in section
+        assert "do not exist" in section.lower() or "do not use" in section.lower()
         assert "Dead ends" in section

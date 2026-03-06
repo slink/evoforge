@@ -487,6 +487,21 @@ class TestIngestReflection:
         assert len(matching) == 1
         assert matching[0].avg_fitness == original_fitness
 
+    def test_dead_ends_cap_respected(self) -> None:
+        """dead_ends set should not exceed max_dead_ends after ingestion."""
+        from evoforge.core.types import Reflection
+
+        mem = SearchMemory(max_patterns=10, max_dead_ends=3)
+        reflection = Reflection(
+            strategies_to_try=[],
+            strategies_to_avoid=[f"avoid_{i}" for i in range(10)],
+            useful_primitives=[],
+            population_diagnosis="",
+            suggested_temperature=0.7,
+        )
+        mem.ingest_reflection(reflection)
+        assert len(mem.dead_ends) <= 3
+
     def test_full_reflection_integration(self) -> None:
         """Full reflection with all fields populates dead_ends and patterns."""
         from evoforge.core.types import Reflection
@@ -504,3 +519,47 @@ class TestIngestReflection:
         assert any("calc blocks" in p.description for p in mem.patterns)
         assert any("norm_nonneg" in p.description for p in mem.patterns)
         assert any("nlinarith" in p.description for p in mem.patterns)
+
+
+# ---------------------------------------------------------------------------
+# Dead-end formatting
+# ---------------------------------------------------------------------------
+
+
+class TestFormatDeadEnds:
+    def test_groups_unknown_identifiers(self) -> None:
+        memory = SearchMemory(max_dead_ends=50)
+        memory.dead_ends.add("cmd_error:unknown_identifier:sum_nonneg")
+        memory.dead_ends.add("cmd_error:unknown_identifier:norm_sq_le")
+        memory.dead_ends.add("cmd_error:unknown_identifier:matrix_two_by_two")
+        result = memory.format_dead_ends()
+        assert "do not exist" in result.lower() or "do not use" in result.lower()
+        assert "sum_nonneg" in result
+        assert "norm_sq_le" in result
+        assert "matrix_two_by_two" in result
+
+    def test_groups_other_categories(self) -> None:
+        memory = SearchMemory(max_dead_ends=50)
+        memory.dead_ends.add("cmd_error:type_mismatch")
+        memory.dead_ends.add("cmd_error:unsolved_goals")
+        result = memory.format_dead_ends()
+        assert "type mismatch" in result or "type_mismatch" in result
+        assert "unsolved goals" in result or "unsolved_goals" in result
+
+    def test_non_cmd_dead_ends_passed_through(self) -> None:
+        memory = SearchMemory(max_dead_ends=50)
+        memory.dead_ends.add("avoid using nlinarith alone")
+        result = memory.format_dead_ends()
+        assert "avoid using nlinarith alone" in result
+
+    def test_empty_dead_ends(self) -> None:
+        memory = SearchMemory(max_dead_ends=50)
+        result = memory.format_dead_ends()
+        assert result == ""
+
+    def test_prompt_section_uses_formatted_dead_ends(self) -> None:
+        memory = SearchMemory(max_dead_ends=50)
+        memory.dead_ends.add("cmd_error:unknown_identifier:fake_lemma")
+        section = memory.prompt_section()
+        assert "fake_lemma" in section
+        assert "do not exist" in section.lower() or "do not use" in section.lower()
