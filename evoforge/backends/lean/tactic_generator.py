@@ -48,14 +48,21 @@ class LLMTacticGenerator:
             proof_so_far="\n".join(proof_so_far) if proof_so_far else "(empty)",
             n=n,
         )
-        response = await self._client.async_generate(
-            prompt,
-            self._system_prompt,
-            self._model,
-            self._temperature,
-            self._max_tokens,
-        )
-        return self._parse_tactics(response.text, n)
+        logger.debug("Requesting %d tactics for goal: %s", n, goal_state[:80])
+        try:
+            response = await self._client.async_generate(
+                prompt,
+                self._system_prompt,
+                self._model,
+                self._temperature,
+                self._max_tokens,
+            )
+        except (RuntimeError, TimeoutError):
+            logger.warning("Tactic generation LLM call failed", exc_info=True)
+            return []
+        tactics = self._parse_tactics(response.text, n)
+        logger.debug("Parsed %d tactics from LLM response", len(tactics))
+        return tactics
 
     @staticmethod
     def _parse_tactics(text: str, n: int) -> list[str]:

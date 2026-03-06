@@ -713,20 +713,29 @@ class EvolutionEngine:
     async def _try_tree_search(self, generation: int) -> None:
         """If enabled, run tree search on the best partial proof."""
         if not self.config.evolution.tree_search_enabled:
+            logger.debug("Tree search: disabled in config")
             return
         if self.llm_client is None:
+            logger.debug("Tree search: no LLM client available")
             return
 
         best_list = self.population.best(k=1)
         if not best_list:
+            logger.debug("Tree search: empty population")
             return
 
         best = best_list[0]
         if best.fitness is None:
+            logger.debug("Tree search: best individual has no fitness")
             return
 
         min_fit = self.config.evolution.tree_search_min_fitness
         if best.fitness.primary < min_fit or best.fitness.primary >= 1.0:
+            logger.debug(
+                "Tree search: best fitness %.3f outside range [%.3f, 1.0)",
+                best.fitness.primary,
+                min_fit,
+            )
             return
 
         # Extract the successful tactic prefix from credits
@@ -740,6 +749,10 @@ class EvolutionEngine:
                     break
 
         if not prefix_tactics:
+            logger.debug(
+                "Tree search: no credited prefix tactics in best individual (genome=%s)",
+                best.genome[:60],
+            )
             return
 
         logger.info(
@@ -755,6 +768,7 @@ class EvolutionEngine:
             beam_width=self.config.evolution.tree_search_beam_width,
         )
         if searcher is None:
+            logger.debug("Tree search: backend.create_tree_search() returned None")
             return
 
         result = await searcher.search()
