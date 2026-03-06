@@ -77,13 +77,18 @@ def extract_hypothesis_types(theorem_statement: str) -> list[str]:
 
 
 def find_files_with_namespace(project_dir: Path, namespace: str) -> list[Path]:
-    """Find .lean files under project_dir that contain ``namespace <name>``."""
-    pattern = f"namespace {namespace}"
+    """Find .lean files under project_dir that contain ``namespace <name>``.
+
+    For dotted namespaces like ``"Outer.Inner"``, checks that each part
+    appears as a ``namespace <part>`` line in the file.  For unqualified
+    names like ``"Inner"``, just checks ``namespace Inner``.
+    """
+    parts = namespace.split(".")
     results: list[Path] = []
     for lean_file in project_dir.rglob("*.lean"):
         try:
             text = lean_file.read_text(encoding="utf-8")
-            if pattern in text:
+            if all(f"namespace {part}" in text for part in parts):
                 results.append(lean_file)
         except (OSError, UnicodeDecodeError):
             continue
@@ -116,15 +121,25 @@ def extract_api_for_theorem(
     return all_entries
 
 
+def _ns_tail_matches(ns_stack: list[str], target_parts: list[str]) -> bool:
+    """Check whether *ns_stack* ends with *target_parts*."""
+    if len(target_parts) > len(ns_stack):
+        return False
+    return ns_stack[-len(target_parts) :] == target_parts
+
+
 def extract_api_from_file(file_path: Path, namespace: str) -> list[APIEntry]:
     """Extract declarations from *file_path* that live in *namespace*.
 
     Tracks ``namespace`` / ``end`` blocks (including nesting) and returns
-    only declarations whose enclosing namespace matches *namespace*.
+    only declarations whose enclosing namespace tail-matches *namespace*.
+    For example, searching for ``"IsPositiveDefinite"`` will match
+    declarations inside ``ProbabilityTheory.IsPositiveDefinite``.
     """
     lines = file_path.read_text().splitlines()
     ns_stack: list[str] = []
     entries: list[APIEntry] = []
+    target_parts = namespace.split(".")
 
     i = 0
     while i < len(lines):
@@ -146,16 +161,17 @@ def extract_api_from_file(file_path: Path, namespace: str) -> list[APIEntry]:
             continue
 
         # Check for declaration only when inside the target namespace.
-        if ".".join(ns_stack) == namespace:
+        if _ns_tail_matches(ns_stack, target_parts):
             decl_match = _DECL_RE.match(stripped)
             if decl_match:
                 name = decl_match.group(2)
                 sig = _extract_signature(decl_match.group(3), lines, i)
                 sorry = _check_sorry(lines, i)
+                full_ns = ".".join(ns_stack)
                 entries.append(
                     APIEntry(
                         name=name,
-                        full_name=f"{namespace}.{name}",
+                        full_name=f"{full_ns}.{name}",
                         signature=sig,
                         has_sorry=sorry,
                     )

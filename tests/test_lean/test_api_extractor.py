@@ -9,8 +9,10 @@ import pytest
 
 from evoforge.backends.lean.api_extractor import (
     APIEntry,
+    extract_api_for_theorem,
     extract_api_from_file,
     extract_hypothesis_types,
+    find_files_with_namespace,
 )
 
 
@@ -118,8 +120,6 @@ class TestExtractHypothesisTypes:
 
 class TestFindLeanFiles:
     def test_finds_file_with_namespace(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import find_files_with_namespace
-
         (tmp_path / "A.lean").write_text("namespace Foo\ntheorem x : True := trivial\nend Foo\n")
         (tmp_path / "B.lean").write_text("namespace Bar\nend Bar\n")
         files = find_files_with_namespace(tmp_path, "Foo")
@@ -127,8 +127,6 @@ class TestFindLeanFiles:
         assert files[0].name == "A.lean"
 
     def test_searches_subdirectories(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import find_files_with_namespace
-
         sub = tmp_path / "Sub"
         sub.mkdir()
         (sub / "C.lean").write_text("namespace Foo\nend Foo\n")
@@ -136,17 +134,76 @@ class TestFindLeanFiles:
         assert len(files) == 1
 
     def test_returns_empty_when_not_found(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import find_files_with_namespace
-
         (tmp_path / "A.lean").write_text("namespace Bar\nend Bar\n")
         files = find_files_with_namespace(tmp_path, "Foo")
         assert files == []
 
+    def test_finds_file_with_nested_namespace(self, tmp_path: Path) -> None:
+        (tmp_path / "A.lean").write_text(
+            "namespace Outer\nnamespace Inner\ntheorem x : True := trivial\nend Inner\nend Outer\n"
+        )
+        files = find_files_with_namespace(tmp_path, "Inner")
+        assert len(files) == 1
+        assert files[0].name == "A.lean"
+
+    def test_finds_file_with_fully_qualified_namespace(self, tmp_path: Path) -> None:
+        (tmp_path / "A.lean").write_text(
+            "namespace Outer\nnamespace Inner\ntheorem x : True := trivial\nend Inner\nend Outer\n"
+        )
+        files = find_files_with_namespace(tmp_path, "Outer.Inner")
+        assert len(files) == 1
+        assert files[0].name == "A.lean"
+
+
+class TestNestedNamespaceExtraction:
+    @pytest.fixture
+    def nested_lean_file(self, tmp_path: Path) -> Path:
+        content = textwrap.dedent("""\
+            import Mathlib
+
+            namespace ProbabilityTheory
+
+            theorem outer_thm (x : Nat) : x = x := by rfl
+
+            namespace IsPositiveDefinite
+
+            theorem re_nonneg (x : Nat) : 0 ≤ x := by omega
+
+            lemma conj_symm (a b : Int) : a + b = b + a := by ring
+
+            end IsPositiveDefinite
+
+            end ProbabilityTheory
+        """)
+        p = tmp_path / "Nested.lean"
+        p.write_text(content)
+        return p
+
+    def test_unqualified_name_matches_nested(self, nested_lean_file: Path) -> None:
+        entries = extract_api_from_file(nested_lean_file, "IsPositiveDefinite")
+        names = [e.name for e in entries]
+        assert "re_nonneg" in names
+        assert "conj_symm" in names
+
+    def test_fully_qualified_also_works(self, nested_lean_file: Path) -> None:
+        entries = extract_api_from_file(nested_lean_file, "ProbabilityTheory.IsPositiveDefinite")
+        names = [e.name for e in entries]
+        assert "re_nonneg" in names
+        assert "conj_symm" in names
+
+    def test_full_name_uses_full_stack(self, nested_lean_file: Path) -> None:
+        entries = extract_api_from_file(nested_lean_file, "IsPositiveDefinite")
+        re_entry = next(e for e in entries if e.name == "re_nonneg")
+        assert re_entry.full_name == "ProbabilityTheory.IsPositiveDefinite.re_nonneg"
+
+    def test_does_not_match_parent_namespace(self, nested_lean_file: Path) -> None:
+        entries = extract_api_from_file(nested_lean_file, "IsPositiveDefinite")
+        names = [e.name for e in entries]
+        assert "outer_thm" not in names
+
 
 class TestExtractApiForTheorem:
     def test_end_to_end(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
-
         lean_file = tmp_path / "Foo.lean"
         lean_file.write_text(
             "namespace IsPositiveDefinite\n"
@@ -163,9 +220,25 @@ class TestExtractApiForTheorem:
         assert "re_nonneg" in names
         assert "conj_neg" in names
 
-    def test_extra_namespaces(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
+    def test_end_to_end_nested(self, tmp_path: Path) -> None:
+        lean_file = tmp_path / "Nested.lean"
+        lean_file.write_text(
+            "namespace ProbabilityTheory\n"
+            "namespace IsPositiveDefinite\n"
+            "theorem re_nonneg (n : ℕ) : 0 ≤ n := by omega\n"
+            "theorem conj_neg (t : ℝ) : t = t := by rfl\n"
+            "end IsPositiveDefinite\n"
+            "end ProbabilityTheory\n"
+        )
+        entries = extract_api_for_theorem(
+            project_dir=tmp_path,
+            theorem_statement="theorem foo (hφ : IsPositiveDefinite φ) : True",
+        )
+        names = [e.name for e in entries]
+        assert "re_nonneg" in names
+        assert "conj_neg" in names
 
+    def test_extra_namespaces(self, tmp_path: Path) -> None:
         (tmp_path / "A.lean").write_text("namespace Extra\ndef helper : Nat := 0\nend Extra\n")
         entries = extract_api_for_theorem(
             project_dir=tmp_path,
@@ -178,8 +251,6 @@ class TestExtractApiForTheorem:
 
 class TestStartupApiExtraction:
     def test_extract_api_for_theorem_with_project(self, tmp_path: Path) -> None:
-        from evoforge.backends.lean.api_extractor import extract_api_for_theorem
-
         lean_file = tmp_path / "Foo.lean"
         lean_file.write_text(
             textwrap.dedent("""\
