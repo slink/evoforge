@@ -129,6 +129,19 @@ class Backend(ABC):
         """
         return True
 
+    async def create_tree_search(
+        self,
+        prefix: list[str],
+        llm_client: Any,
+        max_nodes: int = 200,
+        beam_width: int = 5,
+    ) -> Any | None:
+        """Create a tree search instance seeded from a tactic prefix.
+
+        Returns None if not supported by this backend.
+        """
+        return None
+
     async def startup(self) -> None:
         """Initialize backend resources (e.g. REPL process). No-op by default."""
 

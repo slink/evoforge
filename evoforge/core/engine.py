@@ -414,6 +414,9 @@ class EvolutionEngine:
                     # Stagnation check
                     await self._check_stagnation(gen)
 
+                    # Tree search on best partial proof
+                    await self._try_tree_search(gen)
+
                     # Periodic reflection
                     if (
                         not ablation.disable_reflection
@@ -706,6 +709,81 @@ class EvolutionEngine:
         )
         if self.llm_client is not None and not self.config.ablation.disable_reflection:
             await self._reflect(generation)
+
+    async def _try_tree_search(self, generation: int) -> None:
+        """If enabled, run tree search on the best partial proof."""
+        if not self.config.evolution.tree_search_enabled:
+            return
+        if self.llm_client is None:
+            return
+
+        best_list = self.population.best(k=1)
+        if not best_list:
+            return
+
+        best = best_list[0]
+        if best.fitness is None:
+            return
+
+        min_fit = self.config.evolution.tree_search_min_fitness
+        if best.fitness.primary < min_fit or best.fitness.primary >= 1.0:
+            return
+
+        # Extract the successful tactic prefix from credits
+        prefix_tactics: list[str] = []
+        if best.ir is not None and hasattr(best.ir, "steps"):
+            for i, step in enumerate(best.ir.steps):
+                credited = any(c.location == i and c.score > 0 for c in best.credits)
+                if credited:
+                    prefix_tactics.append(step.raw)
+                else:
+                    break
+
+        if not prefix_tactics:
+            return
+
+        logger.info(
+            "Launching tree search from %d-step prefix (fitness=%.2f)",
+            len(prefix_tactics),
+            best.fitness.primary,
+        )
+
+        searcher = await self.backend.create_tree_search(
+            prefix=prefix_tactics,
+            llm_client=self.llm_client,
+            max_nodes=self.config.evolution.tree_search_max_nodes,
+            beam_width=self.config.evolution.tree_search_beam_width,
+        )
+        if searcher is None:
+            return
+
+        result = await searcher.search()
+
+        if result is not None and result.complete:
+            logger.info("Tree search found complete proof: %s", result.tactics)
+            genome = "\n".join(result.tactics)
+            individuals = self._process_genomes([genome], generation=generation)
+            if individuals:
+                evaluated = await self._evaluator.evaluate_batch(individuals)
+                self._total_evaluations += len(evaluated)
+                self._assign_credits(evaluated)
+                await self._verify_perfect_individuals(evaluated)
+                self._assign_behavior_descriptors(evaluated)
+                self._add_to_population(evaluated)
+        elif result is not None:
+            logger.info(
+                "Tree search exhausted budget (%d nodes), best partial: %d steps",
+                result.nodes_expanded,
+                len(result.tactics),
+            )
+            genome = "\n".join(result.tactics)
+            individuals = self._process_genomes([genome], generation=generation)
+            if individuals:
+                evaluated = await self._evaluator.evaluate_batch(individuals)
+                self._total_evaluations += len(evaluated)
+                self._assign_credits(evaluated)
+                self._assign_behavior_descriptors(evaluated)
+                self._add_to_population(evaluated)
 
     async def _reflect(self, generation: int) -> None:
         """Call the LLM for a reflection, parse the result into memory."""

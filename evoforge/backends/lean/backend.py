@@ -16,7 +16,7 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import jinja2
 
@@ -370,6 +370,7 @@ class LeanBackend(Backend):
             credit_summary=credit_text,
             memory_section=memory_section,
             goal_state=goal_state,
+            api_context=self._api_context,
         )
 
     @staticmethod
@@ -398,6 +399,8 @@ class LeanBackend(Backend):
         errors map to the same pattern key.
         """
         msg = error_msg.strip()
+        # REPL may prefix messages with "Lean error: " — strip it.
+        msg = re.sub(r"^Lean error:\s*", "", msg)
         if msg.startswith("unknown identifier"):
             match = re.search(r"'([^']+)'", msg)
             name = match.group(1) if match else "?"
@@ -639,6 +642,48 @@ class LeanBackend(Backend):
                 temp_path.unlink(missing_ok=True)
             except Exception:
                 pass
+
+    async def create_tree_search(
+        self,
+        prefix: list[str],
+        llm_client: Any,
+        max_nodes: int = 200,
+        beam_width: int = 5,
+    ) -> Any | None:
+        """Create a proof tree search starting from a tactic prefix."""
+        if self._repl is None or self._evaluator is None:
+            return None
+
+        from evoforge.backends.lean.tactic_generator import LLMTacticGenerator
+        from evoforge.backends.lean.tree_search import ProofTreeSearch
+
+        generator = LLMTacticGenerator(
+            client=llm_client,
+            model="claude-sonnet-4-5-20250929",
+            system_prompt=self.system_prompt(),
+            temperature=0.9,
+        )
+
+        # Replay prefix to get the current REPL state
+        state = self._evaluator._initial_proof_state
+        goals: list[Any] = []
+        async with self._repl_lock:
+            for tactic in prefix:
+                resp = await self._repl.send_tactic(tactic, state=state)
+                if "proofState" not in resp:
+                    break
+                state = cast(int, resp["proofState"])
+                goals = cast(list[Any], resp.get("goals", []))
+
+        return ProofTreeSearch(
+            repl=self._repl,
+            tactic_generator=generator,
+            initial_state=state,
+            initial_goals=[str(g) for g in goals] if isinstance(goals, list) else [],
+            max_nodes=max_nodes,
+            beam_width=beam_width,
+            prefix=prefix,
+        )
 
     # -- Extra helpers ------------------------------------------------------
 

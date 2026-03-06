@@ -86,6 +86,10 @@ class EvolutionConfig(BaseModel):
     checkpoint_every: int = 10
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     resume: bool = False
+    tree_search_enabled: bool = False
+    tree_search_max_nodes: int = 200
+    tree_search_beam_width: int = 5
+    tree_search_min_fitness: float = 0.3
 
 
 class ReflectionConfig(BaseModel):

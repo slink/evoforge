@@ -34,10 +34,23 @@ from evoforge.core.types import Credit, Fitness, Individual
 
 
 @dataclass
+class MockStep:
+    """Minimal tactic step for testing."""
+
+    raw: str
+    tactic: str = ""
+
+
+@dataclass
 class MockIR:
     """Minimal IR node for testing."""
 
     lines: list[str]
+
+    @property
+    def steps(self) -> list[MockStep]:
+        """Expose lines as steps with .raw for tree search compatibility."""
+        return [MockStep(raw=line, tactic=line.split("_")[0]) for line in self.lines]
 
     def canonicalize(self) -> MockIR:
         """Return self (already canonical)."""
@@ -1314,3 +1327,122 @@ class TestReflectionParsing:
         # Should not raise
         result = await engine.run()
         assert result.generations_run >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tree search integration
+# ---------------------------------------------------------------------------
+
+
+class TestTreeSearchIntegration:
+    """Tree search hybrid mode integration with the engine."""
+
+    async def test_tree_search_disabled_by_default(self, archive: Archive) -> None:
+        """With default config, tree search does not run."""
+        config = _make_config(max_generations=2, population_size=5)
+        assert config.evolution.tree_search_enabled is False
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        result = await engine.run()
+        assert result.generations_run >= 1
+
+    async def test_tree_search_enabled_no_crash(self, archive: Archive) -> None:
+        """With tree_search_enabled=True, engine runs without error.
+
+        MockBackend.create_tree_search returns None, so tree search is skipped.
+        """
+        config = _make_config(max_generations=3, population_size=5)
+        config.evolution.tree_search_enabled = True
+        config.evolution.tree_search_min_fitness = 0.01
+        backend = MockBackend()
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=_FakeLLMClient()
+        )
+        result = await engine.run()
+        assert result.generations_run >= 1
+
+    async def test_tree_search_dispatched_when_enabled(
+        self, archive: Archive, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """When tree_search_enabled and best fitness > threshold, tree search runs."""
+        config = _make_config(max_generations=3, population_size=5)
+        config.evolution.tree_search_enabled = True
+        config.evolution.tree_search_min_fitness = 0.01
+        backend = MockBackend()
+
+        # Track whether create_tree_search was called
+        create_calls: list[dict[str, Any]] = []
+
+        async def tracking_create(
+            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+        ) -> Any:
+            create_calls.append(
+                {"prefix": prefix, "max_nodes": max_nodes, "beam_width": beam_width}
+            )
+            return None  # Return None = not supported
+
+        backend.create_tree_search = tracking_create  # type: ignore[method-assign]
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=_FakeLLMClient()
+        )
+
+        with caplog.at_level(logging.INFO):
+            await engine.run()
+
+        # Tree search should have been attempted (create_tree_search called)
+        assert len(create_calls) > 0, "create_tree_search was never called"
+
+    async def test_tree_search_config_fields(self) -> None:
+        """EvolutionConfig has tree_search fields with correct defaults."""
+        config = EvolutionConfig()
+        assert config.tree_search_enabled is False
+        assert config.tree_search_max_nodes == 200
+        assert config.tree_search_beam_width == 5
+        assert config.tree_search_min_fitness == 0.3
+
+    async def test_tree_search_skipped_when_fitness_below_threshold(
+        self, archive: Archive
+    ) -> None:
+        """Tree search is not attempted when best fitness < min_fitness."""
+        config = _make_config(max_generations=2, population_size=5)
+        config.evolution.tree_search_enabled = True
+        config.evolution.tree_search_min_fitness = 0.99  # Very high threshold
+
+        backend = MockBackend()
+        create_calls: list[Any] = []
+
+        async def tracking_create(
+            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+        ) -> Any:
+            create_calls.append(True)
+            return None
+
+        backend.create_tree_search = tracking_create  # type: ignore[method-assign]
+        engine = EvolutionEngine(
+            config=config, backend=backend, archive=archive, llm_client=_FakeLLMClient()
+        )
+        await engine.run()
+
+        # With min_fitness=0.99, MockBackend fitness (lines/10) should be below
+        assert len(create_calls) == 0, "Tree search should not be called below threshold"
+
+    async def test_tree_search_skipped_without_llm_client(self, archive: Archive) -> None:
+        """Tree search requires an LLM client; skipped when None."""
+        config = _make_config(max_generations=2, population_size=5)
+        config.evolution.tree_search_enabled = True
+        config.evolution.tree_search_min_fitness = 0.01
+
+        backend = MockBackend()
+        create_calls: list[Any] = []
+
+        async def tracking_create(
+            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+        ) -> Any:
+            create_calls.append(True)
+            return None
+
+        backend.create_tree_search = tracking_create  # type: ignore[method-assign]
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive, llm_client=None)
+        await engine.run()
+
+        assert len(create_calls) == 0, "Tree search should not run without LLM client"
