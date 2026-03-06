@@ -350,6 +350,25 @@ class EvolutionEngine:
                     # Credit assignment
                     credited_offspring = self._assign_credits(evaluated_offspring)
 
+                    # Update ensemble stats with fitness deltas
+                    parent_fitness_map: dict[str, float] = {
+                        ind.ir_hash: (ind.fitness.primary if ind.fitness else 0.0)
+                        for ind in pop_list
+                    }
+                    for parent_hash, child_hash, op_name in offspring_lineage:
+                        child_ind = next(
+                            (ind for ind in credited_offspring if ind.ir_hash == child_hash),
+                            None,
+                        )
+                        if child_ind is None:
+                            continue
+                        child_fit = child_ind.fitness.primary if child_ind.fitness else 0.0
+                        parent_fit = parent_fitness_map.get(parent_hash, 0.0)
+                        delta = child_fit - parent_fit
+                        self._ensemble.update_stats(
+                            op_name, success=(delta > 0), fitness_delta=delta
+                        )
+
                     # Verify fitness=1.0 proofs before survival selection
                     await self._verify_perfect_individuals(credited_offspring)
 

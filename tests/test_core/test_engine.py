@@ -1187,3 +1187,16 @@ class TestCrossoverGuidanceIndividual:
         # Non-crossover operators should have guidance_individual=None
         for ctx in contexts_seen:
             assert ctx.guidance_individual is None
+
+
+class TestEnsembleStatsUpdated:
+    """After each generation, operator stats should reflect applications."""
+
+    async def test_ensemble_stats_updated(self, archive: Archive) -> None:
+        config = _make_config(max_generations=2, population_size=5)
+        backend = MockBackend()
+        engine = EvolutionEngine(config=config, backend=backend, archive=archive)
+        await engine.run()
+
+        total_apps = sum(s.applications for s in engine._ensemble.stats.values())
+        assert total_apps > 0, "Ensemble stats should track operator applications"
