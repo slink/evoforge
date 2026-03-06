@@ -25,7 +25,11 @@ if TYPE_CHECKING:
 
 from evoforge.backends.base import Backend
 from evoforge.backends.lean.credit import assign_credit_lean
-from evoforge.backends.lean.evaluator import LeanREPLProcess, LeanStepwiseEvaluator
+from evoforge.backends.lean.evaluator import (
+    LeanREPLProcess,
+    LeanStepwiseEvaluator,
+    _compute_fitness,
+)
 from evoforge.backends.lean.ir import TacticSequence, parse_tactic_sequence
 from evoforge.backends.lean.operators import (
     PrefixTruncation,
@@ -85,23 +89,6 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 logger = logging.getLogger(__name__)
-
-# Graduated fitness for false-positive proofs by cmd error category.
-# Higher = closer to a valid proof, giving selection real gradient signal.
-_CMD_ERROR_FITNESS: dict[str, float] = {
-    "unsolved_goals": 0.85,
-    "type_mismatch": 0.75,
-    "other": 0.70,
-    "unknown_identifier": 0.60,
-    "sorry": 0.50,
-}
-_DEFAULT_FALSE_POSITIVE_FITNESS = 0.70
-
-
-def _false_positive_fitness(error_pattern: str) -> float:
-    """Look up graduated fitness score from a classified error pattern."""
-    category = error_pattern.split(":")[0]
-    return _CMD_ERROR_FITNESS.get(category, _DEFAULT_FALSE_POSITIVE_FITNESS)
 
 
 def _reindent_tactics(genome: str) -> str:
@@ -217,8 +204,8 @@ class LeanBackend(Backend):
 
         If step-by-step evaluation reports proof complete (fitness=1.0),
         performs inline REPL cmd verification. Verified proofs keep 1.0;
-        false positives are downgraded to a graduated score based on the
-        error category (still feasible, preserving gradient signal).
+        false positives are marked infeasible with formula-derived fitness
+        (Deb 2000 constraint handling).
         """
         if self._evaluator is None:
             raise RuntimeError("LeanBackend.startup() must be called before evaluate()")
@@ -234,24 +221,34 @@ class LeanBackend(Backend):
                 if not cmd_verified:
                     diagnostics.cmd_error_message = cmd_error
                     error_pattern = self._classify_cmd_error(cmd_error or "unknown")
-                    fp_fitness = _false_positive_fitness(error_pattern)
+                    # Derive inputs for the standard partial-proof formula
+                    steps = int(fitness.auxiliary.get("steps_succeeded", 1))
+                    goal_red = float(fitness.auxiliary.get("goal_reduction", 0.0))
+                    goals_rem = float(fitness.auxiliary.get("goals_remaining", 0.0))
+                    initial_goals = max(1, int(goal_red + goals_rem))
+                    fp = _compute_fitness(
+                        steps_succeeded=steps,
+                        total_steps=max(steps, 1),
+                        initial_goals=initial_goals,
+                        goals_remaining=max(1, initial_goals),
+                        proof_complete=False,
+                    )
                     logger.info(
                         "REPL step-by-step said complete but cmd verification failed — "
-                        "downgrading to %.2f (%s): %s",
-                        fp_fitness,
+                        "infeasible %.2f (%s): %s",
+                        fp.primary,
                         error_pattern,
                         genome[:80],
                     )
                     fitness = Fitness(
-                        primary=fp_fitness,
+                        primary=fp.primary,
                         auxiliary={
-                            **fitness.auxiliary,
-                            "proof_complete": 0.0,
+                            **fp.auxiliary,
                             "cmd_verified": 0.0,
                             "cmd_error_pattern": error_pattern,
                         },
-                        constraints=fitness.constraints,
-                        feasible=True,
+                        constraints={"cmd_verification": True},
+                        feasible=False,
                     )
                 else:
                     fitness = Fitness(

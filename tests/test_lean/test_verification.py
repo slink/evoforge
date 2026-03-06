@@ -577,9 +577,10 @@ class TestTwoTierFitness:
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="ring")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.75)
-        assert fitness.feasible is True
+        assert fitness.primary == pytest.approx(0.4)
+        assert fitness.feasible is False
         assert fitness.auxiliary.get("cmd_verified") == 0.0
+        assert fitness.constraints.get("cmd_verification") is True
 
     async def test_partial_proof_unchanged(self) -> None:
         """Partial proof (fitness < 1.0) is not affected by verification."""
@@ -615,9 +616,9 @@ class TestTwoTierFitness:
 
 
 class TestGraduatedCmdScoring:
-    """False-positive proofs get graduated fitness based on error category."""
+    """False-positive proofs are marked infeasible with formula-derived fitness."""
 
-    def _make_complete_backend(self, error_msg: str) -> LeanBackend:
+    def _make_complete_backend(self, error_msg: str, *, cmd_passes: bool = False) -> LeanBackend:
         backend = _make_backend(project_dir="/tmp/test")
         mock_evaluator = AsyncMock()
         mock_evaluator.evaluate = AsyncMock(
@@ -626,8 +627,9 @@ class TestGraduatedCmdScoring:
                     primary=1.0,
                     auxiliary={
                         "proof_complete": 1.0,
-                        "steps_succeeded": 1.0,
+                        "steps_succeeded": 3.0,
                         "goals_remaining": 0.0,
+                        "goal_reduction": 1.0,
                     },
                     constraints={},
                     feasible=True,
@@ -638,48 +640,56 @@ class TestGraduatedCmdScoring:
         )
         backend._evaluator = mock_evaluator
         backend._repl_lock = asyncio.Lock()
-        backend._verify_via_repl_cmd = AsyncMock(return_value=(False, error_msg))  # type: ignore[method-assign]
+        backend._verify_via_repl_cmd = AsyncMock(  # type: ignore[method-assign]
+            return_value=(cmd_passes, None if cmd_passes else error_msg),
+        )
         return backend
 
     @pytest.mark.asyncio
-    async def test_unsolved_goals_gets_0_85(self) -> None:
+    async def test_false_positive_is_infeasible(self) -> None:
         backend = self._make_complete_backend("unsolved goals\n⊢ False")
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="simp")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.85)
+        assert fitness.feasible is False
 
     @pytest.mark.asyncio
-    async def test_type_mismatch_gets_0_75(self) -> None:
+    async def test_false_positive_uses_partial_formula(self) -> None:
+        """For a 1-goal theorem (goal_reduction=1 → initial_goals=1) where all
+        steps succeed but proof_complete=False:
+        0.4 * (3/3) + 0.6 * ((1 - max(1,1)) / max(1,1)) = 0.4 * 1.0 + 0.6 * 0.0 = 0.4
+        """
+        backend = self._make_complete_backend("unsolved goals\n⊢ False")
+        ir = MagicMock()
+        ir.serialize = MagicMock(return_value="simp")
+        fitness, _, _ = await backend.evaluate(ir)
+        assert fitness.primary == pytest.approx(0.4)
+
+    @pytest.mark.asyncio
+    async def test_false_positive_has_cmd_constraint(self) -> None:
         backend = self._make_complete_backend("type mismatch\nexpected Nat")
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="simp")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.75)
+        assert "cmd_verification" in fitness.constraints
+        assert fitness.constraints["cmd_verification"] is True
 
     @pytest.mark.asyncio
-    async def test_unknown_identifier_gets_0_60(self) -> None:
+    async def test_false_positive_preserves_error_pattern(self) -> None:
         backend = self._make_complete_backend("unknown identifier 'foo'")
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="simp")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.60)
+        assert "cmd_error_pattern" in fitness.auxiliary
 
     @pytest.mark.asyncio
-    async def test_sorry_gets_0_50(self) -> None:
-        backend = self._make_complete_backend("proof contains sorry")
+    async def test_cmd_verified_proof_stays_feasible(self) -> None:
+        backend = self._make_complete_backend("", cmd_passes=True)
         ir = MagicMock()
         ir.serialize = MagicMock(return_value="simp")
         fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.50)
-
-    @pytest.mark.asyncio
-    async def test_other_error_gets_0_70(self) -> None:
-        backend = self._make_complete_backend("some weird error")
-        ir = MagicMock()
-        ir.serialize = MagicMock(return_value="simp")
-        fitness, _, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.70)
+        assert fitness.feasible is True
+        assert fitness.primary == pytest.approx(1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -936,7 +946,9 @@ class TestEvaluateCmdErrorThreading:
         )
 
         fitness, returned_diag, _ = await backend.evaluate(ir)
-        assert fitness.primary == pytest.approx(0.60)
+        assert fitness.primary == pytest.approx(0.4)
+        assert fitness.feasible is False
+        assert fitness.constraints.get("cmd_verification") is True
         assert returned_diag.cmd_verification_attempted is True
         assert returned_diag.cmd_error_message == "unknown identifier 'sum_nonneg'"
 
@@ -1014,13 +1026,13 @@ class TestEngineErrorToMemory:
         ind = make_individual(
             genome="simp",
             fitness=Fitness(
-                primary=0.9,
+                primary=0.4,
                 auxiliary={
                     "cmd_verified": 0.0,
                     "cmd_error_pattern": "unknown_identifier:sum_nonneg",
                 },
-                constraints={},
-                feasible=True,
+                constraints={"cmd_verification": True},
+                feasible=False,
             ),
         )
         # Simulate what the engine does
