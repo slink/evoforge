@@ -790,6 +790,59 @@ class TestClassifyCmdError:
         assert result.startswith("other:")
         assert len(result) <= 80
 
+    def test_lean_error_prefix_stripped_unknown_identifier(self) -> None:
+        """REPL 'Lean error: ' prefix is stripped before classification."""
+        result = LeanBackend._classify_cmd_error("Lean error: unknown identifier 'foo'")
+        assert result == "unknown_identifier:foo"
+
+    def test_lean_error_prefix_stripped_type_mismatch(self) -> None:
+        """REPL 'Lean error: ' prefix is stripped for type mismatch."""
+        result = LeanBackend._classify_cmd_error("Lean error: type mismatch\nexpected Nat")
+        assert result == "type_mismatch"
+
+
+# ---------------------------------------------------------------------------
+# API context in mutation prompt
+# ---------------------------------------------------------------------------
+
+
+class TestApiInMutationPrompt:
+    def test_api_context_rendered_in_mutation_prompt(self) -> None:
+        from evoforge.backends.lean.api_extractor import APIEntry
+
+        b = _make_backend()
+        b._api_context = [
+            APIEntry(
+                name="re_nonneg",
+                full_name="IsPositiveDefinite.re_nonneg",
+                signature="(n : ℕ) : 0 ≤ (∑ ...).re",
+            ),
+        ]
+        parent = make_individual(genome="simp")
+        prompt = b.format_mutation_prompt(parent, context=None)
+        assert "Available API" in prompt
+        assert "re_nonneg" in prompt
+
+    def test_empty_api_no_section_in_mutation_prompt(self) -> None:
+        b = _make_backend()
+        b._api_context = []
+        parent = make_individual(genome="simp")
+        prompt = b.format_mutation_prompt(parent, context=None)
+        assert "Available API" not in prompt
+
+    def test_sorry_entries_excluded_in_mutation_prompt(self) -> None:
+        from evoforge.backends.lean.api_extractor import APIEntry
+
+        b = _make_backend()
+        b._api_context = [
+            APIEntry(name="good", full_name="Ns.good", signature=": True", has_sorry=False),
+            APIEntry(name="bad", full_name="Ns.bad", signature=": True", has_sorry=True),
+        ]
+        parent = make_individual(genome="simp")
+        prompt = b.format_mutation_prompt(parent, context=None)
+        assert "Ns.good" in prompt
+        assert "Ns.bad" not in prompt
+
 
 # ---------------------------------------------------------------------------
 # API context in system prompt

@@ -25,6 +25,15 @@ Focus on closing or simplifying these goals.
 {{ memory_section }}
 {% endif %}
 
+{% if api_context %}
+## Available API
+These lemmas and definitions exist in the project — use ONLY these:
+{% for entry in api_context %}{% if not entry.has_sorry %}
+- `{{ entry.full_name }}` : {{ entry.signature }}
+{% endif %}{% endfor %}
+Do NOT reference methods not listed here.
+{% endif %}
+
 ## Instructions
 Modify the proof to address the issues above. Focus on the failing or low-credit steps.
 If the proof is stuck, consider:
