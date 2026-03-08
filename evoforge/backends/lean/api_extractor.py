@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Extract theorem/lemma/def declarations from Lean 4 source files.
 
 Parses `.lean` files to find declarations within a given namespace,

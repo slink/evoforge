@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.core.types – the leaf data types of the system."""
 
 from __future__ import annotations

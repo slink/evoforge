@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Selection strategies for the evoforge evolutionary engine."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Lean tactic intermediate representation.
 
 Provides :class:`TacticStep`, :class:`TacticSequence`, and the

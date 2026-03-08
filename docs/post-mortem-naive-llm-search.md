@@ -65,6 +65,35 @@ We were doing FunSearch-style evolutionary search (which works great for *progra
 
 **Added tree search:** A best-first `ProofTreeSearch` that expands the most promising proof states, asking the LLM for N candidate tactics at each node. It runs as a hybrid alongside evolution — evolution finds promising proof prefixes, tree search efficiently explores branches from those prefixes.
 
+## Second Run: After the Fixes (42 generations, 2.5 hours)
+
+```
+42 generations, 1797 evaluations, 2h 36m
+Best feasible fitness: 0.22 (6 steps succeeded, stuck on final goal)
+Best overall fitness: 1.0 (18 evaluations) — ALL false positives
+7 unique "complete" proofs found — all fail lake env lean
+410/1797 evaluations (23%) got fitness 0.0 (first tactic fails)
+Diversity: flat at 1.19 for 38 consecutive generations
+```
+
+The bug fixes helped — the system now finds proofs that the REPL considers complete. But every single one is a false positive. The three-tier verification correctly catches them (REPL step-by-step passes, REPL cmd passes, `lake env lean` rejects), but this creates a devastating feedback loop:
+
+1. The search finds "complete" proofs (fitness=1.0)
+2. Verification marks them infeasible
+3. The best *feasible* fitness is 0.22 — too low for tree search to trigger (threshold was 0.3)
+4. Tree search never fires because `population.best()` doesn't check feasibility and sees 1.0
+5. The population stays stuck, generating variations of the same false-positive patterns
+
+The false positives all use `hφ.pdMatrix_posSemidef` — a mathematically correct approach (2x2 positive semidefinite matrix argument) that the REPL's tactic mode accepts but the full kernel elaborator rejects. The REPL's `tactic` command is less strict than full elaboration; tactics like `nlinarith` and `norm_num` can "close" goals interactively that the kernel then rejects when assembling the complete proof term.
+
+**The fundamental problem remains:** evolution cannot navigate a fitness landscape that is essentially a cliff. Partial proofs at 0.1–0.3 fitness give no signal about which path leads to a genuine complete proof. The system correctly identifies false positives but has no way to learn from them — it just marks them infeasible and keeps generating similar ones.
+
+## Final Verdict
+
+Evolution is the wrong search strategy for theorem proving. The project infrastructure (REPL integration, evaluation pipeline, verification, LLM client, archive) is solid and reusable, but the evolutionary wrapper adds overhead without value for this domain. The fitness landscape for proofs is binary — works or doesn't — with no smooth gradient for selection pressure to exploit.
+
+The evoforge architecture is better suited to domains with **continuous fitness landscapes** where small mutations produce small fitness changes. The CFD backend (evolving turbulence closure functions) is a natural fit: each candidate produces a real-valued error metric, nearby functions produce nearby errors, and partial improvements are meaningful.
+
 ## Lessons
 
 1. **Test your operators actually run.** We had unit tests for each operator in isolation, but no integration test verifying the engine actually invoked them with correct arguments. The bugs hid because the system *appeared* to work — it just worked badly.

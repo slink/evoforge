@@ -331,9 +331,7 @@ class TestMetadata:
     def test_assign_credit_returns_list(self) -> None:
         backend = CFDBackend(CFDBackendConfig())
         ir = parse_closure_expr("1 - Ri_g/0.25")
-        fit = Fitness(
-            primary=0.5, auxiliary={"raw_accuracy": 0.5}, constraints={}, feasible=True
-        )
+        fit = Fitness(primary=0.5, auxiliary={"raw_accuracy": 0.5}, constraints={}, feasible=True)
         result = backend.assign_credit(ir, fit, None, None)
         assert isinstance(result, list)
 

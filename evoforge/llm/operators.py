@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """LLM-powered mutation operators for the evoforge evolutionary engine.
 
 Provides two operators that use an LLM to generate new genome candidates:

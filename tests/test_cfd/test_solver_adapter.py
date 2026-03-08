@@ -40,8 +40,14 @@ class TestComputeNuTCustom:
 
         # Built-in linear damping
         nu_t_ref, D_t_ref = compute_nu_t(
-            u, C, grid, g_prime=g_prime, Sc_t=Sc_t, Ri_c=Ri_c,
-            epsilon=epsilon, damping="linear",
+            u,
+            C,
+            grid,
+            g_prime=g_prime,
+            Sc_t=Sc_t,
+            Ri_c=Ri_c,
+            epsilon=epsilon,
+            damping="linear",
         )
 
         # Custom with equivalent linear lambda (Numba kernel clips to [0, 1])
@@ -49,8 +55,14 @@ class TestComputeNuTCustom:
             return np.clip(1.0 - Ri_g / Ri_c, 0.0, 1.0)
 
         nu_t_custom, D_t_custom = compute_nu_t_custom(
-            u, C, grid, g_prime=g_prime, Sc_t=Sc_t, Ri_c=Ri_c,
-            epsilon=epsilon, damping_fn=linear_damping,
+            u,
+            C,
+            grid,
+            g_prime=g_prime,
+            Sc_t=Sc_t,
+            Ri_c=Ri_c,
+            epsilon=epsilon,
+            damping_fn=linear_damping,
         )
 
         np.testing.assert_allclose(nu_t_custom, nu_t_ref, rtol=1e-10)
@@ -69,8 +81,14 @@ class TestComputeNuTCustom:
             return np.zeros_like(Ri_g)
 
         nu_t, D_t = compute_nu_t_custom(
-            u, C, grid, g_prime=0.0, Sc_t=1.0, Ri_c=0.25,
-            epsilon=1e-10, damping_fn=zero_damping,
+            u,
+            C,
+            grid,
+            g_prime=0.0,
+            Sc_t=1.0,
+            Ri_c=0.25,
+            epsilon=1e-10,
+            damping_fn=zero_damping,
         )
 
         np.testing.assert_array_equal(nu_t, 0.0)
@@ -88,8 +106,14 @@ class TestComputeNuTCustom:
             return np.ones_like(Ri_g)
 
         nu_t, D_t = compute_nu_t_custom(
-            u, C, grid, g_prime=0.0, Sc_t=1.0, Ri_c=0.25,
-            epsilon=1e-10, damping_fn=identity_damping,
+            u,
+            C,
+            grid,
+            g_prime=0.0,
+            Sc_t=1.0,
+            Ri_c=0.25,
+            epsilon=1e-10,
+            damping_fn=identity_damping,
         )
 
         assert nu_t.shape == (grid.N,)
@@ -111,8 +135,14 @@ class TestComputeNuTCustom:
             return 1.0 - 10.0 * Ri_g
 
         nu_t, _ = compute_nu_t_custom(
-            u, C, grid, g_prime=1.0, Sc_t=1.0, Ri_c=0.25,
-            epsilon=1e-10, damping_fn=wild_damping,
+            u,
+            C,
+            grid,
+            g_prime=1.0,
+            Sc_t=1.0,
+            Ri_c=0.25,
+            epsilon=1e-10,
+            damping_fn=wild_damping,
         )
 
         assert np.all(nu_t >= 0.0)

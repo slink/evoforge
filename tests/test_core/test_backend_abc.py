@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for the Backend ABC contract.
 
 Verifies that the Backend abstract base class defines the complete set of

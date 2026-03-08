@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Identity pipeline: parse, canonicalize, hash, and deduplicate genomes."""
 
 from __future__ import annotations

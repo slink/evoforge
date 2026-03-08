@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Mutation operators and ensemble orchestration for evoforge.
 
 Defines the abstract base class for mutation operators, the context

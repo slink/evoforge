@@ -75,9 +75,7 @@ class ClosureExpr:
             new_expr = new_expr + t
         return ClosureExpr(new_expr)
 
-    def replace_subtree(
-        self, target: sympy.Expr, replacement: sympy.Expr
-    ) -> ClosureExpr:
+    def replace_subtree(self, target: sympy.Expr, replacement: sympy.Expr) -> ClosureExpr:
         """Substitute *target* with *replacement* in the expression."""
         new_expr = self.expr.subs(target, replacement)
         return ClosureExpr(new_expr)

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for the SQLite-backed archive (cache / dedup / lineage)."""
 
 from __future__ import annotations

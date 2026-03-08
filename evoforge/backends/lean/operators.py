@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Cheap mutation operators for Lean tactic sequences.
 
 Provides four lightweight (no LLM call) mutation operators that manipulate

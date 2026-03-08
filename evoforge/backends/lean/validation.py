@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Structural validation for Lean tactic sequences.
 
 Checks a :class:`TacticSequence` against a set of rules and returns a list of

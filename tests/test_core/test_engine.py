@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Integration tests for evoforge.core.engine — EvolutionEngine."""
 
 from __future__ import annotations

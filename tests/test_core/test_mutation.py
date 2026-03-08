@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.core.mutation – mutation operators, context, stats, and ensemble."""
 
 from __future__ import annotations

@@ -49,11 +49,7 @@ class ConstantPerturb:
             return None
 
         # Find all Number atoms, excluding zero
-        constants = [
-            atom
-            for atom in ir.expr.atoms(sympy.Number)
-            if atom != sympy.Integer(0)
-        ]
+        constants = [atom for atom in ir.expr.atoms(sympy.Number) if atom != sympy.Integer(0)]
         if not constants:
             return None
 

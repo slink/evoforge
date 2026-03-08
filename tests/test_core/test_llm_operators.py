@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for LLM-powered mutation operators (LLMMutate & LLMCrossover)."""
 
 from __future__ import annotations

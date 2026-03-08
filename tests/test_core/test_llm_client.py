@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for LLM client retry logic and cost estimation."""
 
 from __future__ import annotations

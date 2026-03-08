@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Evaluator layer: caching, async batching, timeout, and determinism."""
 
 from __future__ import annotations

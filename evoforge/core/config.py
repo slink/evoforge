@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Pydantic configuration models and TOML loader for evoforge."""
 
 from __future__ import annotations

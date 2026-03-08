@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """EvolutionEngine — main evolutionary loop tying all components together."""
 
 from __future__ import annotations

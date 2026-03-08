@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """LLM-based tactic generator for proof tree search."""
 
 from __future__ import annotations

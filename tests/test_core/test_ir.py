@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.core.ir — IRProtocol, BehaviorDimension, BehaviorSpaceConfig."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Lean 4 backend facade for evoforge.
 
 Implements :class:`LeanBackend`, the concrete :class:`Backend` subclass for

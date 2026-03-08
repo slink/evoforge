@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Search memory for the evoforge evolutionary engine.
 
 Tracks successful patterns, failure modes, credit aggregation, stagnation

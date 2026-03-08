@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Intermediate-representation primitives for evoforge.
 
 Defines the structural protocol every IR node must satisfy, plus the

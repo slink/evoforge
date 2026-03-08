@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Stepwise Lean tactic evaluator.
 
 Provides :class:`LeanStepwiseEvaluator` which drives a Lean REPL subprocess

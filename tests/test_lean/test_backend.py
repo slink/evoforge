@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for LeanBackend.format_proof()."""
 
 from __future__ import annotations

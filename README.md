@@ -1,10 +1,14 @@
 # evoforge
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 An evolutionary engine for formally-grounded symbolic expressions. It uses LLMs to suggest mutations and formal verification systems to evaluate fitness. Two backends: Lean 4 theorem proving (on hold) and CFD turbulence closure optimization (active).
 
-The idea: instead of asking an LLM to produce a complete proof in one shot, treat proof construction as a search problem. Maintain a population of partial proof attempts, evolve them over generations using both cheap syntactic operators and LLM-guided mutations, and let the formal verifier be the sole judge of progress.
+An LLM-guided evolutionary engine for formally-grounded symbolic expressions. It maintains a population of candidates, evolves them using both cheap syntactic operators and LLM-guided mutations, and uses formal evaluation systems to measure fitness.
 
-This is a research project. It works end-to-end but has not yet produced a novel proof.
+The first backend targeted Lean 4 theorem proving. After extensive experimentation, we found that **evolution is the wrong search strategy for theorem proving** — the fitness landscape is essentially binary (proof works or doesn't) with no smooth gradient for selection to exploit. See [the post-mortem](docs/post-mortem-naive-llm-search.md) for the full analysis.
+
+The architecture is better suited to domains with **continuous fitness landscapes**. The next backend targets CFD turbulence closure optimization — evolving damping functions where small mutations produce small fitness changes and partial improvements are meaningful.
 
 ## How it works
 
@@ -155,7 +159,11 @@ Experiments are configured via TOML files. See `configs/lean_default.toml` for a
 
 ## Status
 
-This is early-stage research software. The evolutionary loop runs end-to-end, checkpointing and resume work, and the test suite covers the components well. The current target theorem (`norm_le_one` from the LeanLevy project) has not been solved yet — the engine finds partial proofs but hasn't closed the full proof.
+Research software. The core evolutionary engine, LLM integration, and Lean 4 backend are complete and well-tested. The Lean backend demonstrated that the architecture works end-to-end but also revealed a fundamental mismatch between evolutionary search and theorem proving (see [post-mortem](docs/post-mortem-naive-llm-search.md)).
+
+**Current focus:** CFD turbulence closure backend, where the continuous fitness landscape is a natural fit for evolutionary optimization.
+
+**Lean backend status:** Functional but on hold. The engine finds partial proofs and even "complete" proofs that pass REPL verification, but all fail full kernel elaboration. Theorem proving needs tree search (MCTS, best-first), not evolution.
 
 Known limitations:
 - Two backends (Lean 4 on hold, CFD active)

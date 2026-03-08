@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.backends.lean.credit and evoforge.backends.lean.validation."""
 
 from __future__ import annotations

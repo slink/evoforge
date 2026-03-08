@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for the 5 new abstract methods on LeanBackend.
 
 Covers: version(), eval_config_hash(), default_operator_weights(),

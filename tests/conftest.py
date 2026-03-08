@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Shared test fixtures and factories for evoforge."""
 
 from __future__ import annotations

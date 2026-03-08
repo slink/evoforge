@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for config schema — verifies all DESIGN_v4 sections exist with correct defaults."""
 
 from __future__ import annotations

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for checkpoint save/load and resume functionality."""
 
 from __future__ import annotations

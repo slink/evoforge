@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Core data types for the evoforge evolutionary engine."""
 
 from __future__ import annotations

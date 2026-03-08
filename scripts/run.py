@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 #!/usr/bin/env python
 """Run an evoforge evolution experiment."""
 

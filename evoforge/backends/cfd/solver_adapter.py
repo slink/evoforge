@@ -146,7 +146,9 @@ def run_case_evolved(
     ) -> tuple[npt.NDArray[np.floating[Any]], npt.NDArray[np.floating[Any]]]:
         """Drop-in replacement that uses the evolved damping_fn."""
         return compute_nu_t_custom(
-            u, C, grid,
+            u,
+            C,
+            grid,
             g_prime=g_prime,
             Sc_t=Sc_t,
             Ri_c=Ri_c,

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """SQLite-backed archive for individuals, fitness cache, prefix cache, and lineage."""
 
 from __future__ import annotations

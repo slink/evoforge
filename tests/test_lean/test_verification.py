@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for proof verification, configurable seeds, structured parsing, and prompts."""
 
 from __future__ import annotations

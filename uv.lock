@@ -318,7 +318,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20" },
     { name = "anthropic", specifier = ">=0.40.0" },
-    { name = "fluidflow", editable = "../../../laminarization-transition-study" },
+    { name = "fluidflow", editable = "../laminarization-transition-study" },
     { name = "greenlet", specifier = "==3.1.0" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "numpy", specifier = ">=1.26" },
@@ -342,7 +342,7 @@ dev = [
 [[package]]
 name = "fluidflow"
 version = "0.1.0"
-source = { editable = "../../../laminarization-transition-study" }
+source = { editable = "../laminarization-transition-study" }
 dependencies = [
     { name = "matplotlib" },
     { name = "numba" },

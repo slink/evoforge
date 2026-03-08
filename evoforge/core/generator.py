@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Validated generator: LLM-backed generation with a 4-stage validation pipeline.
 
 Calls the LLM, extracts a genome from the raw response, parses it into IR,

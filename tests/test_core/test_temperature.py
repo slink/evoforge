@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for EvolutionEngine._compute_temperature static method."""
 
 from __future__ import annotations

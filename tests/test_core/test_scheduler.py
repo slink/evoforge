@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for per-generation LLM budget enforcement in ExecutionScheduler."""
 
 from __future__ import annotations

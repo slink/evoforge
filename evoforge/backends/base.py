@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Abstract base class for evoforge backends.
 
 Every domain backend (Lean, Python, etc.) must subclass :class:`Backend`

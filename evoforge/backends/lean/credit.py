@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Per-tactic credit assignment for the Lean backend.
 
 Analyses an evaluation trace to assign localized credit to each tactic step,

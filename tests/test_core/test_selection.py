@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.core.selection – selection strategy implementations."""
 
 from __future__ import annotations

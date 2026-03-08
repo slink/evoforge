@@ -70,4 +70,4 @@ testpaths = ["tests"]
 timeout = 30
 
 [tool.uv.sources]
-fluidflow = { path = "../../../laminarization-transition-study", editable = true }
+fluidflow = { path = "../laminarization-transition-study", editable = true }

@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Best-first proof tree search over REPL tactic states.
 
 Explores a tree of tactic applications using a priority queue (max-heap by

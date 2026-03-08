@@ -1,3 +1,4 @@
+# Copyright (c) 2026 evocode contributors. MIT License. See LICENSE.
 """Tests for evoforge.backends.lean.api_extractor module."""
 
 from __future__ import annotations
