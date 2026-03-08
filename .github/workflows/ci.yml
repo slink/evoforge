@@ -11,7 +11,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: git clone --depth 1 https://github.com/slink/laminarization-transition-study.git ../laminarization-transition-study
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
       - run: uv sync --dev
       - run: uv run ruff check .
       - run: uv run ruff format --check .
@@ -20,7 +23,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: git clone --depth 1 https://github.com/slink/laminarization-transition-study.git ../laminarization-transition-study
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
       - run: uv sync --dev
       - run: uv run mypy evoforge/
 
@@ -28,6 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: git clone --depth 1 https://github.com/slink/laminarization-transition-study.git ../laminarization-transition-study
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.11"
       - run: uv sync --dev
       - run: uv run pytest -x -v -m "not lean"
