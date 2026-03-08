@@ -26,10 +26,11 @@ class ClosureExpr:
     subtree replacement, and NumPy evaluation.
     """
 
-    __slots__ = ("expr",)
+    __slots__ = ("expr", "_hash_cache")
 
     def __init__(self, expr: sympy.Expr) -> None:
         self.expr: sympy.Expr = expr
+        self._hash_cache: str | None = None
 
     # -- IRProtocol ----------------------------------------------------------
 
@@ -39,10 +40,12 @@ class ClosureExpr:
         return ClosureExpr(canonical)
 
     def structural_hash(self) -> str:
-        """SHA-256 hex digest of the canonical serialization."""
-        canon = self.canonicalize()
-        data = canon.serialize().encode("utf-8")
-        return hashlib.sha256(data).hexdigest()
+        """SHA-256 hex digest of the canonical serialization (cached)."""
+        if self._hash_cache is None:
+            canon = self.canonicalize()
+            data = canon.serialize().encode("utf-8")
+            self._hash_cache = hashlib.sha256(data).hexdigest()
+        return self._hash_cache
 
     def serialize(self) -> str:
         """Human-readable string representation (via ``sympy.srepr`` of
@@ -70,10 +73,7 @@ class ClosureExpr:
         remaining = terms[:index] + terms[index + 1 :]
         if not remaining:
             return ClosureExpr(sympy.Integer(0))
-        new_expr: sympy.Expr = remaining[0]
-        for t in remaining[1:]:
-            new_expr = new_expr + t
-        return ClosureExpr(new_expr)
+        return ClosureExpr(Add(*remaining))
 
     def replace_subtree(self, target: sympy.Expr, replacement: sympy.Expr) -> ClosureExpr:
         """Substitute *target* with *replacement* in the expression."""

@@ -153,16 +153,25 @@ class TestEndToEnd:
 
 
 class TestMutationOperatorsIntegration:
-    def test_constant_perturb_produces_valid(self) -> None:
+    async def test_constant_perturb_produces_valid(self) -> None:
         """ConstantPerturb produces parseable offspring."""
+        from evoforge.core.mutation import MutationContext
+
         op = ConstantPerturb()
         parent = _make_individual("1 - Ri_g/0.25")
+        ctx = MutationContext(
+            generation=0,
+            memory=None,
+            guidance="",
+            temperature=0.7,
+            backend=None,
+            credits=[],
+        )
 
-        # Run multiple times — operator is stochastic, some may return None
         valid_count = 0
         for _ in range(20):
-            result = op.apply(parent, None)
-            if result is not None:
+            result = await op.apply(parent, ctx)
+            if result != parent.genome:
                 ir = parse_closure_expr(result)
                 assert ir is not None, f"Unparseable offspring: {result}"
                 assert ir.free_symbols_ok(), f"Bad symbols in: {result}"
@@ -170,15 +179,25 @@ class TestMutationOperatorsIntegration:
 
         assert valid_count > 0, "ConstantPerturb never produced a valid offspring"
 
-    def test_subtree_mutate_produces_valid(self) -> None:
+    async def test_subtree_mutate_produces_valid(self) -> None:
         """SubtreeMutate produces parseable offspring."""
+        from evoforge.core.mutation import MutationContext
+
         op = SubtreeMutate()
         parent = _make_individual("1 - Ri_g/0.25 + Ri_g**2")
+        ctx = MutationContext(
+            generation=0,
+            memory=None,
+            guidance="",
+            temperature=0.7,
+            backend=None,
+            credits=[],
+        )
 
         valid_count = 0
         for _ in range(20):
-            result = op.apply(parent, None)
-            if result is not None:
+            result = await op.apply(parent, ctx)
+            if result != parent.genome:
                 ir = parse_closure_expr(result)
                 assert ir is not None, f"Unparseable offspring: {result}"
                 assert ir.free_symbols_ok(), f"Bad symbols in: {result}"
@@ -186,15 +205,25 @@ class TestMutationOperatorsIntegration:
 
         assert valid_count > 0, "SubtreeMutate never produced a valid offspring"
 
-    def test_term_add_remove_produces_valid(self) -> None:
+    async def test_term_add_remove_produces_valid(self) -> None:
         """TermAddRemove produces parseable offspring."""
+        from evoforge.core.mutation import MutationContext
+
         op = TermAddRemove()
         parent = _make_individual("1 - Ri_g/0.25")
+        ctx = MutationContext(
+            generation=0,
+            memory=None,
+            guidance="",
+            temperature=0.7,
+            backend=None,
+            credits=[],
+        )
 
         valid_count = 0
         for _ in range(20):
-            result = op.apply(parent, None)
-            if result is not None:
+            result = await op.apply(parent, ctx)
+            if result != parent.genome:
                 ir = parse_closure_expr(result)
                 assert ir is not None, f"Unparseable offspring: {result}"
                 assert ir.free_symbols_ok(), f"Bad symbols in: {result}"
@@ -202,12 +231,14 @@ class TestMutationOperatorsIntegration:
 
         assert valid_count > 0, "TermAddRemove never produced a valid offspring"
 
-    def test_all_backend_operators_have_apply(self) -> None:
-        """All operators returned by backend.mutation_operators() have apply()."""
+    def test_all_backend_operators_are_mutation_operators(self) -> None:
+        """All operators returned by backend.mutation_operators() are MutationOperator."""
+        from evoforge.core.mutation import MutationOperator
+
         backend = CFDBackend(CFDBackendConfig())
         ops = backend.mutation_operators()
         assert len(ops) == 3
         for op in ops:
+            assert isinstance(op, MutationOperator)
             assert hasattr(op, "apply")
             assert callable(op.apply)
-            assert hasattr(op, "name")

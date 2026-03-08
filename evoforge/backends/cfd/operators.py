@@ -9,12 +9,13 @@ representing turbulence damping functions f(Ri_g).
 from __future__ import annotations
 
 import random
-from typing import Any
+from typing import Literal
 
 import sympy
 from sympy import Integer, Rational, exp, sqrt
 
 from evoforge.backends.cfd.ir import ClosureExpr, Ri_g, parse_closure_expr
+from evoforge.core.mutation import MutationContext, MutationOperator
 from evoforge.core.types import Individual
 
 # Fragments used by SubtreeMutate for random subtree replacement.
@@ -37,21 +38,26 @@ def _collect_nodes(expr: sympy.Basic) -> list[sympy.Basic]:
     return nodes
 
 
-class ConstantPerturb:
+class ConstantPerturb(MutationOperator):
     """Perturb a random numerical constant by a Gaussian factor."""
 
-    name: str = "constant_perturb"
-    cost: str = "cheap"
+    @property
+    def name(self) -> str:
+        return "constant_perturb"
 
-    def apply(self, parent: Individual, context: Any) -> str | None:
+    @property
+    def cost(self) -> Literal["cheap", "llm"]:
+        return "cheap"
+
+    async def apply(self, parent: Individual, context: MutationContext) -> str:
         ir = parent.ir
         if not isinstance(ir, ClosureExpr):
-            return None
+            return parent.genome
 
         # Find all Number atoms, excluding zero
-        constants = [atom for atom in ir.expr.atoms(sympy.Number) if atom != sympy.Integer(0)]
+        constants = [atom for atom in ir.expr.atoms(sympy.Number) if not atom.is_zero]
         if not constants:
-            return None
+            return parent.genome
 
         target = random.choice(constants)
         factor = 1.0 + random.gauss(0.0, 0.15)
@@ -60,21 +66,26 @@ class ConstantPerturb:
         return str(new_expr)
 
 
-class SubtreeMutate:
+class SubtreeMutate(MutationOperator):
     """Replace a random non-root subtree with a random fragment."""
 
-    name: str = "subtree_mutate"
-    cost: str = "cheap"
+    @property
+    def name(self) -> str:
+        return "subtree_mutate"
 
-    def apply(self, parent: Individual, context: Any) -> str | None:
+    @property
+    def cost(self) -> Literal["cheap", "llm"]:
+        return "cheap"
+
+    async def apply(self, parent: Individual, context: MutationContext) -> str:
         ir = parent.ir
         if not isinstance(ir, ClosureExpr):
-            return None
+            return parent.genome
 
         nodes = _collect_nodes(ir.expr)
         # Exclude root node (index 0)
         if len(nodes) < 2:
-            return None
+            return parent.genome
 
         target = random.choice(nodes[1:])
         replacement = random.choice(_FRAGMENTS)
@@ -83,20 +94,25 @@ class SubtreeMutate:
         # Validate the result
         result = parse_closure_expr(str(new_expr))
         if result is None or not result.free_symbols_ok():
-            return None
+            return parent.genome
         return str(new_expr)
 
 
-class TermAddRemove:
+class TermAddRemove(MutationOperator):
     """Add or remove an additive term from the expression."""
 
-    name: str = "term_add_remove"
-    cost: str = "cheap"
+    @property
+    def name(self) -> str:
+        return "term_add_remove"
 
-    def apply(self, parent: Individual, context: Any) -> str | None:
+    @property
+    def cost(self) -> Literal["cheap", "llm"]:
+        return "cheap"
+
+    async def apply(self, parent: Individual, context: MutationContext) -> str:
         ir = parent.ir
         if not isinstance(ir, ClosureExpr):
-            return None
+            return parent.genome
 
         terms = ir.additive_terms()
 

@@ -141,7 +141,7 @@ def main() -> None:
             proof_path.write_text(proof_text)
             print(f"Proof written to {proof_path}")
 
-            if args.verify:
+            if args.verify and config.run.backend != "cfd":
                 import subprocess as _sp
 
                 if "sorry" in result.best_individual.genome:
@@ -159,6 +159,8 @@ def main() -> None:
                     else:
                         print("WARNING: Proof failed lake verification:")
                         print(ret.stderr.decode(errors="replace"))
+            elif args.verify and config.run.backend == "cfd":
+                print("(--verify is not applicable to CFD backend)")
 
         sys.exit(0 if result.best_fitness >= 1.0 else 1)
 

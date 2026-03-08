@@ -276,21 +276,22 @@ class CFDBackend(Backend):
             return errors
         if not ir.free_symbols_ok():
             errors.append("Expression contains symbols other than Ri_g")
-        if ir.complexity() > self.config.max_complexity:
-            errors.append(
-                f"Complexity {ir.complexity()} exceeds limit {self.config.max_complexity}"
-            )
+        c = ir.complexity()
+        if c > self.config.max_complexity:
+            errors.append(f"Complexity {c} exceeds limit {self.config.max_complexity}")
         return errors
 
     # -- Seeding -------------------------------------------------------------
 
     def seed_population(self, n: int) -> list[str]:
         """Generate n seed genomes from the built-in bank + config seeds."""
-        seeds = list(self.config.seeds) + [s for s in _SEED_BANK if s not in self.config.seeds]
+        config_set = set(self.config.seeds)
+        seeds = list(self.config.seeds) + [s for s in _SEED_BANK if s not in config_set]
         if len(seeds) >= n:
             return seeds[:n]
         # Pad with perturbations of existing seeds
         result = list(seeds)
+        seen: set[str] = set(result)
         rng = random.Random(42)
         while len(result) < n:
             base = rng.choice(seeds)
@@ -301,7 +302,8 @@ class CFDBackend(Backend):
             factor = rng.uniform(0.8, 1.2)
             perturbed = ir.expr * factor
             perturbed_str = str(perturbed)
-            if perturbed_str not in result:
+            if perturbed_str not in seen:
+                seen.add(perturbed_str)
                 result.append(perturbed_str)
         return result[:n]
 
@@ -452,7 +454,7 @@ class CFDBackend(Backend):
         """Format a reflection prompt with top-5 closures."""
         sorted_pop = sorted(
             [ind for ind in population if ind.fitness is not None],
-            key=lambda i: i.fitness.primary if i.fitness else 0.0,
+            key=lambda i: i.fitness.primary,  # type: ignore[union-attr]
             reverse=True,
         )
         top = sorted_pop[:5]
@@ -489,21 +491,19 @@ class CFDBackend(Backend):
 
 def _classify_form(ir: ClosureExpr) -> str:
     """Classify the functional form of a closure expression."""
-    s = str(ir.expr)
-    has_exp = "exp" in s
-    has_pow = "**" in s
-    has_div = "/" in s or "Pow" in str(type(ir.expr))
+    from sympy import Pow, exp
 
-    # Check for Ri_g in a denominator (rational form)
-    from sympy import Pow
+    has_exp = bool(ir.expr.atoms(exp))
 
     is_rational = False
+    has_pow = False
     for sub in ir.expr.atoms(Pow):
         if Ri_g in sub.free_symbols and sub.args[1].is_negative:
             is_rational = True
-            break
+        elif Ri_g in sub.free_symbols:
+            has_pow = True
 
-    if has_exp and (is_rational or has_div):
+    if has_exp and is_rational:
         return "composite"
     if has_exp:
         return "exponential"
