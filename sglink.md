@@ -1654,3 +1654,228 @@ canonicalize to the same IR still share cache entries.
 (immediate dead-end, prompt visibility, max cap, serialization roundtrip)
 and 4 for the engine verification cache (prevents redundant calls, caches
 positive results, feeds failures to memory, checkpoint roundtrip). 3 more tests cover cache-hit log silencing (DEBUG vs WARNING), redundant `record_verification_failure` prevention, and early rejection of known-bad hashes before evaluation.
+
+---
+
+## 19. The CFD Pivot -- Why Evolution Needs a Gradient
+
+After months of building and running the Lean backend, we hit a fundamental
+realization: **evolution is the wrong search strategy for theorem proving.**
+
+Here is the core problem. A proof either works or it does not. There is no
+"80% correct proof." You can measure partial progress (how many goals did you
+close? how far through the tactic sequence did you get?), and we did -- the
+fitness formula `0.4 * step_ratio + 0.6 * goal_reduction_ratio` gives a
+continuous-ish signal. But it is a *synthetic* gradient, a human-engineered
+proxy that only loosely correlates with "closeness to a complete proof." Two
+proofs with fitness 0.85 and 0.87 might be equally far from success, or one
+might be one tactic away. The fitness landscape is riddled with plateaus and
+cliffs.
+
+This is like trying to breed racehorses by measuring how far they get before
+falling off a cliff. You can rank them by distance, but that ranking tells
+you almost nothing about which horse could actually finish the course with a
+small tweak. Most "improvements" just move the cliff edge slightly.
+
+**CFD turbulence closures are the opposite.** When you tweak a damping
+function `f(Ri_g)` that controls turbulent viscosity in a sediment-laden
+flow, the predicted friction factors change *smoothly*. Make the damping
+slightly stronger, friction goes up a bit. Make it weaker, friction goes
+down. This is exactly the kind of fitness landscape where evolution thrives
+-- small mutations produce small fitness changes, and the population can
+hill-climb toward the optimum through genuine selection pressure.
+
+The technical term is *evolvability*. A representation is evolvable when
+small genotypic changes (mutations) produce small phenotypic changes (fitness
+differences). Lean proofs have terrible evolvability. Symbolic math
+expressions in a RANS solver have excellent evolvability.
+
+So we built a second backend.
+
+---
+
+## 20. The CFD Backend -- Architecture
+
+### The Domain
+
+The target domain is 1D Reynolds-Averaged Navier-Stokes (RANS) simulation
+of turbulent channel flow with suspended sediment. The reference data comes
+from Jensen et al. (1989) -- experimental measurements of friction factors
+for sediment-laden flows at various concentrations. The question: what
+mathematical form should the turbulence damping function `f(Ri_g)` take to
+best match the experimental data?
+
+Traditional approaches use hand-crafted formulas like `f(Ri) = 1 / (1 + 10 * Ri)`
+or `f(Ri) = exp(-4 * Ri)`. We let evolution discover the formula.
+
+### The IR: ClosureExpr
+
+Where the Lean backend uses `TacticSequence` (a list of tactic steps) as its
+intermediate representation, the CFD backend uses `ClosureExpr` -- a wrapper
+around a SymPy expression tree.
+
+```python
+@dataclass
+class ClosureExpr:
+    expr: sympy.Expr          # the symbolic expression, e.g. 1/(1 + 10*Ri)
+    free_symbols: frozenset   # typically just {Ri}
+    source: str               # the string form for display/hashing
+```
+
+SymPy gives us structural manipulation for free: we can substitute
+subexpressions, simplify, differentiate, check equivalence, and (crucially)
+convert to a fast NumPy callable via `sympy.lambdify`. The `source` string
+is what gets stored in the archive and passed through the identity pipeline.
+
+Canonicalization uses `sympy.simplify()` followed by string normalization.
+Two expressions that are algebraically equivalent (like `1/(1+10*Ri)` and
+`(1+10*Ri)**(-1)`) get the same canonical form and the same `ir_hash`.
+
+### The Pipeline
+
+Here is the data flow for evaluating a single candidate damping function:
+
+```
+"1/(1 + alpha*Ri)"
+      |
+      v
+  ClosureExpr.parse()       # SymPy parsing + validation
+      |
+      v
+  sympy.lambdify()           # Convert to NumPy callable: f(Ri) -> float
+      |
+      v
+  SolverAdapter.evaluate()   # Monkey-patch into RANS solver, run cases
+      |                      # Compare predicted fw with Jensen et al. (1989)
+      v
+  Fitness(primary=0.87)      # RMSE-based fitness (lower error = higher fitness)
+```
+
+The key insight is the **monkey-patching approach**. The RANS solver (from
+the sibling `fluidflow` project) has a function `compute_nu_t()` that
+computes turbulent viscosity. Instead of modifying the solver code, the
+`SolverAdapter` temporarily replaces `compute_nu_t` with a version that
+calls the evolved damping function. After evaluation, it restores the
+original. This means we treat the solver as a black box -- we never touch
+its internals, and it never knows it is being used for evolution.
+
+This is Approach A from the design: **lambdify-based injection**. Each
+evaluation takes ~1-3 seconds because SymPy's `lambdify` produces
+interpreted NumPy code. A future Approach C would use Numba to JIT-compile
+the damping function down to native machine code (~0.1s per case), but
+Approach A is fast enough for initial experiments. You should not optimize
+what you have not measured yet.
+
+### Fitness Calculation
+
+The fitness function compares the solver's predicted friction factors against
+Jensen et al. (1989) experimental data across multiple flow cases (varying
+sediment concentrations, Reynolds numbers, etc.). The metric is:
+
+```
+fitness = 1.0 / (1.0 + rmse)
+```
+
+Where `rmse` is the root-mean-square error between predicted and experimental
+friction factors. This maps [0, inf) error to (0, 1] fitness. A perfect match
+gives fitness=1.0. The sigmoid-like transformation means the fitness signal
+is strongest when the candidate is already close to the data -- exactly where
+you want the most selection pressure.
+
+If the solver diverges or throws an exception (which happens for pathological
+damping functions like `f(Ri) = -100`), the candidate gets fitness=0.0 and
+is marked `feasible=False`. Evolution learns to avoid these regions quickly.
+
+### Credit Assignment
+
+The Lean backend uses per-tactic credit (which tactic closed the most goals?).
+That does not apply here -- there are no "steps" in a math expression. Instead,
+the CFD backend uses **ablation-based credit assignment**: remove each term
+from the expression, re-evaluate, and measure how much fitness drops. Terms
+whose removal hurts fitness the most get the most credit.
+
+For example, if `f(Ri) = 1/(1 + 10*Ri) + 0.01*Ri**2` has fitness 0.87, and
+removing the `0.01*Ri**2` term drops fitness to 0.85, then the quadratic term
+gets credit proportional to `0.87 - 0.85 = 0.02`. This tells evolution which
+parts of the expression are load-bearing and which are dead weight.
+
+### Cheap Operators
+
+Three mutation operators designed for expression trees:
+
+1. **ConstantPerturb** -- Nudge a random numeric constant by a small amount.
+   If `10*Ri` appears, perturb 10 to 9.7 or 10.3. This is the workhorse
+   operator for fine-tuning coefficients once the right functional form has
+   been found.
+
+2. **SubtreeMutate** -- Replace a random subtree with a new random
+   expression. This makes larger structural changes -- swapping `Ri**2` for
+   `exp(-Ri)`, for instance.
+
+3. **TermAddRemove** -- Add a new term to the expression or remove an
+   existing one. This changes the complexity of the damping function,
+   allowing evolution to discover that (say) a two-term formula works
+   better than a one-term formula.
+
+These operators work at the SymPy AST level, not the string level. They
+understand the mathematical structure, so they produce valid expressions
+by construction (no syntax errors, no unbalanced parentheses).
+
+---
+
+## 21. Lessons from the Pivot
+
+### Match the algorithm to the landscape
+
+This is the big one. Evolution is a powerful optimizer, but it needs
+something to optimize *against*. A binary pass/fail signal is nearly useless
+for evolutionary search -- it is like trying to find your keys in the dark
+by randomly walking around and checking "am I standing on my keys? no."
+A continuous fitness signal is like having a metal detector -- it gets louder
+as you get closer, and you can follow the gradient.
+
+The Lean experience was not wasted. The entire core engine -- selection,
+mutation ensemble, adaptive weights, search memory, archive, checkpointing
+-- transfers directly to CFD. We just swap the backend. That is the payoff
+of the clean `Backend ABC` abstraction: the engine does not know or care
+whether it is evolving tactic proofs or damping functions.
+
+### The monkey-patching pattern
+
+Injecting evolved expressions into an existing solver via monkey-patching
+is surprisingly robust. The solver does not need to be "evolution-aware."
+It just calls `compute_nu_t()` and gets back numbers. Whether those numbers
+come from a hardcoded formula or an evolved SymPy expression is invisible
+to it. This pattern generalizes: any numerical code with a configurable
+function can be used as a fitness evaluator.
+
+### SymPy as the IR layer
+
+SymPy turned out to be an excellent choice for the intermediate
+representation. It gives you:
+- Free parsing from strings to ASTs
+- Canonical simplification (algebraic deduplication)
+- `lambdify` for fast numerical evaluation
+- Structural operations (substitution, traversal) for mutation operators
+- Pretty-printing for human-readable archive entries
+
+The one downside is performance -- `lambdify` produces interpreted NumPy
+code, not compiled code. But for 1-3 second evaluations, this is fine.
+
+### The files
+
+All CFD backend code lives in `evoforge/backends/cfd/`:
+
+| File | Purpose |
+|------|---------|
+| `ir.py` | `ClosureExpr` dataclass, parsing, canonicalization, hashing |
+| `backend.py` | `CFDBackend` -- implements the Backend ABC for CFD |
+| `solver_adapter.py` | `SolverAdapter` -- monkey-patches fluidflow's solver |
+| `credit.py` | Ablation-based credit assignment |
+| `operators.py` | `ConstantPerturb`, `SubtreeMutate`, `TermAddRemove` |
+
+**Test count: 416 → 652.** 236 new tests cover the full CFD backend:
+ClosureExpr parsing/canonicalization/hashing, CFDBackend lifecycle and
+evaluation, SolverAdapter monkey-patching, ablation credit, all three
+mutation operators, config wiring, and integration tests that run the
+full evolutionary loop with a mock solver.
