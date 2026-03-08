@@ -78,23 +78,28 @@ def main() -> None:
     logging.getLogger("anthropic").setLevel(logging.WARNING)
 
     # Create backend
-    from evoforge.backends.lean.backend import LeanBackend
+    if config.run.backend == "cfd":
+        from evoforge.backends.cfd.backend import CFDBackend
 
-    # LEAN_PROJECT_DIR env var overrides config
-    project_dir = os.environ.get("LEAN_PROJECT_DIR", config.backend.project_dir)
+        backend = CFDBackend(config.cfd_backend)
+    else:
+        from evoforge.backends.lean.backend import LeanBackend
 
-    # Treat empty repl_path as None (TOML has repl_path = "")
-    repl_path = config.backend.repl_path or None
+        # LEAN_PROJECT_DIR env var overrides config
+        project_dir = os.environ.get("LEAN_PROJECT_DIR", config.backend.project_dir)
 
-    backend = LeanBackend(
-        theorem_statement=config.backend.theorem_statement,
-        project_dir=project_dir,
-        repl_path=repl_path,
-        imports=config.backend.imports,
-        seeds=config.backend.seeds or None,
-        extra_api_namespaces=config.backend.extra_api_namespaces or None,
-        verification_threads=config.eval.verification_threads,
-    )
+        # Treat empty repl_path as None (TOML has repl_path = "")
+        repl_path = config.backend.repl_path or None
+
+        backend = LeanBackend(
+            theorem_statement=config.backend.theorem_statement,
+            project_dir=project_dir,
+            repl_path=repl_path,
+            imports=config.backend.imports,
+            seeds=config.backend.seeds or None,
+            extra_api_namespaces=config.backend.extra_api_namespaces or None,
+            verification_threads=config.eval.verification_threads,
+        )
 
     # Create archive (file-backed SQLite in output dir)
     from evoforge.core.archive import Archive

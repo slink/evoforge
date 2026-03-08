@@ -1,0 +1,102 @@
+[run]
+name = "cfd_damping_search_001"
+backend = "cfd"
+seed = 42
+
+[population]
+size = 30
+elite_k = 3
+
+[selection]
+strategy = "lexicase"
+tournament_size = 3
+epsilon = 0.0
+
+[mutation]
+schedule = "adaptive"
+llm_weight = 0.3
+cheap_weight = 0.6
+crossover_weight = 0.1
+
+[llm]
+model = "claude-sonnet-4-5-20250929"
+reflection_model = "claude-sonnet-4-5-20250929"
+temperature = 0.7
+temperature_start = 1.0
+temperature_end = 0.3
+temperature_schedule = "linear"
+max_tokens = 4096
+max_calls = 500
+max_cost_usd = 25.0
+max_attempts = 3
+
+[eval]
+max_concurrent = 2
+timeout_seconds = 120.0
+seed = 42
+
+[backend]
+name = "cfd"
+
+[cfd_backend]
+n_cycles = 10
+grid_N = 64
+grid_H = 5.0
+grid_gamma = 2.0
+Sc_t = 1.0
+max_complexity = 30
+seeds = [
+  "1 - Ri_g/0.25",
+  "exp(-4*Ri_g)",
+  "1/(1 + 4*Ri_g)",
+]
+
+[[cfd_backend.benchmark_cases]]
+name = "jensen_Re394"
+Re = 394.0
+S = 0.0
+Lambda = 0.0
+reference_fw = 0.226
+
+[[cfd_backend.benchmark_cases]]
+name = "jensen_Re803"
+Re = 803.0
+S = 0.0
+Lambda = 0.0
+reference_fw = 0.114
+
+[evolution]
+max_generations = 100
+stagnation_window = 15
+checkpoint_every = 10
+log_level = "INFO"
+tree_search_enabled = false
+
+[reflection]
+interval = 10
+include_top_k = 5
+include_bottom_k = 5
+
+[memory]
+max_patterns = 20
+max_dead_ends = 15
+max_constructs = 30
+
+[scheduler]
+mode = "async_batch"
+max_llm_concurrent = 2
+max_eval_concurrent = 4
+max_pending = 8
+llm_budget_per_gen = 10
+
+[diversity]
+strategy = "map_elites"
+sampling = "weighted"
+
+[ablation]
+disable_llm = false
+disable_diagnostics = false
+disable_reflection = false
+disable_memory = false
+disable_cheap_operators = false
+disable_credit = false
