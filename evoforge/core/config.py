@@ -136,6 +136,32 @@ class AblationConfig(BaseModel):
     disable_credit: bool = False
 
 
+class CFDBenchmarkCase(BaseModel):
+    """A single benchmark case for CFD evaluation."""
+
+    name: str
+    Re: float
+    S: float = 0.0
+    Lambda: float = 0.0
+    reference_fw: float = 0.0
+    reference_regime: str = ""
+
+
+class CFDBackendConfig(BaseModel):
+    """Configuration for the CFD turbulence closure backend."""
+
+    solver_project_dir: str = ""
+    n_cycles: int = 20
+    convergence_tol: float = 0.01
+    grid_N: int = 128
+    grid_H: float = 5.0
+    grid_gamma: float = 2.0
+    Sc_t: float = 1.0
+    max_complexity: int = 30
+    benchmark_cases: list[CFDBenchmarkCase] = []
+    seeds: list[str] = []
+
+
 class EvoforgeConfig(BaseModel):
     """Root configuration for an evoforge run."""
 
@@ -152,6 +178,7 @@ class EvoforgeConfig(BaseModel):
     scheduler: SchedulerSettings = SchedulerSettings()
     diversity: DiversityConfig = DiversityConfig()
     ablation: AblationConfig = AblationConfig()
+    cfd_backend: CFDBackendConfig = CFDBackendConfig()
 
 
 def load_config(path: str | Path) -> EvoforgeConfig:

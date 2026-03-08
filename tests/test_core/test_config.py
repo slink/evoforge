@@ -9,6 +9,8 @@ import pytest
 from evoforge.core.config import (
     AblationConfig,
     BackendConfig,
+    CFDBackendConfig,
+    CFDBenchmarkCase,
     DiversityConfig,
     EvalConfig,
     EvoforgeConfig,
@@ -177,3 +179,76 @@ class TestLoadConfig:
         assert cfg.llm.temperature_start == pytest.approx(1.0)
         assert cfg.llm.reflection_model != ""
         assert cfg.llm.max_attempts == 3
+
+
+# ---------------------------------------------------------------------------
+# CFD config models
+# ---------------------------------------------------------------------------
+
+
+class TestCFDBenchmarkCase:
+    def test_required_fields(self) -> None:
+        case = CFDBenchmarkCase(name="test", Re=100.0)
+        assert case.name == "test"
+        assert case.Re == 100.0
+
+    def test_defaults(self) -> None:
+        case = CFDBenchmarkCase(name="x", Re=1.0)
+        assert case.S == 0.0
+        assert case.Lambda == 0.0
+        assert case.reference_fw == 0.0
+        assert case.reference_regime == ""
+
+
+class TestCFDBackendConfig:
+    def test_defaults(self) -> None:
+        cfg = CFDBackendConfig()
+        assert cfg.solver_project_dir == ""
+        assert cfg.n_cycles == 20
+        assert cfg.convergence_tol == pytest.approx(0.01)
+        assert cfg.grid_N == 128
+        assert cfg.grid_H == pytest.approx(5.0)
+        assert cfg.grid_gamma == pytest.approx(2.0)
+        assert cfg.Sc_t == pytest.approx(1.0)
+        assert cfg.max_complexity == 30
+        assert cfg.benchmark_cases == []
+        assert cfg.seeds == []
+
+    def test_with_benchmark_cases(self) -> None:
+        cfg = CFDBackendConfig(
+            benchmark_cases=[
+                CFDBenchmarkCase(name="c1", Re=394.0, reference_fw=0.226),
+                CFDBenchmarkCase(name="c2", Re=803.0, S=0.5),
+            ],
+        )
+        assert len(cfg.benchmark_cases) == 2
+        assert cfg.benchmark_cases[0].name == "c1"
+        assert cfg.benchmark_cases[1].S == pytest.approx(0.5)
+
+    def test_evoforge_config_has_cfd_backend(self) -> None:
+        cfg = EvoforgeConfig()
+        assert isinstance(cfg.cfd_backend, CFDBackendConfig)
+
+    def test_toml_round_trip(self, tmp_path: Path) -> None:
+        toml_content = """\
+[cfd_backend]
+n_cycles = 5
+grid_N = 32
+max_complexity = 20
+seeds = ["1 - Ri_g/0.25", "exp(-Ri_g)"]
+
+[[cfd_backend.benchmark_cases]]
+name = "jensen_Re394"
+Re = 394.0
+reference_fw = 0.226
+"""
+        p = tmp_path / "cfd_test.toml"
+        p.write_text(toml_content)
+        cfg = load_config(p)
+        assert cfg.cfd_backend.n_cycles == 5
+        assert cfg.cfd_backend.grid_N == 32
+        assert cfg.cfd_backend.max_complexity == 20
+        assert len(cfg.cfd_backend.seeds) == 2
+        assert len(cfg.cfd_backend.benchmark_cases) == 1
+        assert cfg.cfd_backend.benchmark_cases[0].name == "jensen_Re394"
+        assert cfg.cfd_backend.benchmark_cases[0].Re == pytest.approx(394.0)
