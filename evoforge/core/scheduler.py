@@ -94,9 +94,10 @@ class ExecutionScheduler:
         """Return True if the per-generation LLM budget has not been exhausted."""
         return self._gen_llm_calls < self._config.llm_budget_per_gen
 
-    def record_gen_llm_call(self) -> None:
-        """Record an LLM call against the per-generation budget."""
+    def record_gen_llm_call(self, tokens: int = 0, cost_usd: float = 0.0) -> None:
+        """Record an LLM call against per-generation and global budgets."""
         self._gen_llm_calls += 1
+        self._tracker.record_llm_call(tokens, cost_usd)
 
     def reset_generation(self) -> None:
         """Reset per-generation counters for a new generation."""

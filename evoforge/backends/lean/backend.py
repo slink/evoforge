@@ -224,12 +224,13 @@ class LeanBackend(Backend):
                     error_pattern = self._classify_cmd_error(cmd_error or "unknown")
                     # Derive inputs for the standard partial-proof formula
                     steps = int(fitness.auxiliary.get("steps_succeeded", 1))
+                    total = int(fitness.auxiliary.get("total_steps", steps))
                     goal_red = float(fitness.auxiliary.get("goal_reduction", 0.0))
                     goals_rem = float(fitness.auxiliary.get("goals_remaining", 0.0))
                     initial_goals = max(1, int(goal_red + goals_rem))
                     fp = _compute_fitness(
                         steps_succeeded=steps,
-                        total_steps=max(steps, 1),
+                        total_steps=max(total, 1),
                         initial_goals=initial_goals,
                         goals_remaining=max(1, initial_goals),
                         proof_complete=False,
@@ -647,6 +648,7 @@ class LeanBackend(Backend):
         llm_client: Any,
         max_nodes: int = 200,
         beam_width: int = 5,
+        model: str | None = None,
     ) -> Any | None:
         """Create a proof tree search starting from a tactic prefix."""
         if self._repl is None or self._evaluator is None:
@@ -657,7 +659,7 @@ class LeanBackend(Backend):
 
         generator = LLMTacticGenerator(
             client=llm_client,
-            model="claude-sonnet-4-5-20250929",
+            model=model or "claude-sonnet-4-5-20250929",
             system_prompt=self.system_prompt(),
             temperature=0.9,
         )

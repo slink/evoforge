@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 
 class RunConfig(BaseModel):
@@ -180,6 +180,26 @@ class EvoforgeConfig(BaseModel):
     diversity: DiversityConfig = DiversityConfig()
     ablation: AblationConfig = AblationConfig()
     cfd_backend: CFDBackendConfig = CFDBackendConfig()
+
+    @model_validator(mode="after")
+    def _check_backend_fields(self) -> EvoforgeConfig:
+        """Validate that backend-specific required fields are set.
+
+        Only fires when the corresponding backend config has been explicitly
+        populated (i.e. is not pure defaults), so that partial configs for
+        tests and non-primary backends don't trigger false errors.
+        """
+        if self.run.backend == "lean" and self.backend.name == "lean":
+            has_lean_config = self.backend.theorem_statement or self.backend.project_dir
+            if has_lean_config:
+                if not self.backend.theorem_statement:
+                    raise ValueError("backend.theorem_statement is required for the lean backend")
+                if not self.backend.project_dir:
+                    raise ValueError("backend.project_dir is required for the lean backend")
+        elif self.run.backend == "cfd":
+            if not self.cfd_backend.solver_project_dir and self.cfd_backend.benchmark_cases:
+                raise ValueError("cfd_backend.solver_project_dir is required for the cfd backend")
+        return self
 
 
 def load_config(path: str | Path) -> EvoforgeConfig:

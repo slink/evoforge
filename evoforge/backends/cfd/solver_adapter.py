@@ -10,6 +10,7 @@ fluidflow modules for a single solver run.
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from typing import Any
 
@@ -91,8 +92,9 @@ def compute_nu_t_custom(
         0.0,
     )
 
-    # Apply damping and clip to non-negative
+    # Apply damping and clip to non-negative; guard NaN/Inf
     f = np.maximum(damping_fn(Ri_g), 0.0)
+    f = np.where(np.isfinite(f), f, 0.0)
 
     nu_t = nu_t0 * f
     D_t = nu_t / Sc_t
@@ -156,15 +158,20 @@ def run_case_evolved(
             damping_fn=damping_fn,
         )
 
-    try:
-        obl_mod.compute_nu_t = _patched_compute_nu_t
-        sweep_mod.compute_nu_t = _patched_compute_nu_t
-        result: dict[str, Any] = sweep_mod.single_run(params)
-    finally:
-        obl_mod.compute_nu_t = original_obl
-        sweep_mod.compute_nu_t = original_sweep
+    with _SOLVER_LOCK:
+        try:
+            obl_mod.compute_nu_t = _patched_compute_nu_t
+            sweep_mod.compute_nu_t = _patched_compute_nu_t
+            result: dict[str, Any] = sweep_mod.single_run(params)
+        finally:
+            obl_mod.compute_nu_t = original_obl
+            sweep_mod.compute_nu_t = original_sweep
 
     return result
+
+
+# Module-level lock to prevent concurrent monkey-patching of compute_nu_t.
+_SOLVER_LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------------------

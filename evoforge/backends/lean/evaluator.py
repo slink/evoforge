@@ -61,6 +61,7 @@ def _compute_fitness(
         primary=primary,
         auxiliary={
             "steps_succeeded": float(steps_succeeded),
+            "total_steps": float(total_steps),
             "goals_remaining": float(goals_remaining),
             "goal_reduction": float(max(0, initial_goals - goals_remaining)),
             "proof_complete": 1.0 if proof_complete else 0.0,
@@ -212,6 +213,7 @@ class LeanREPLProcess:
         self._proc: subprocess.Popen[bytes] | None = None
         self._reader: asyncio.StreamReader | None = None
         self._master_fd: int | None = None
+        self._transport: asyncio.BaseTransport | None = None
 
     async def start(self) -> None:
         """Start the Lean REPL subprocess."""
@@ -238,15 +240,23 @@ class LeanREPLProcess:
         loop = asyncio.get_running_loop()
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: protocol, os.fdopen(master_fd, "rb", 0))
+        transport, _ = await loop.connect_read_pipe(
+            lambda: protocol, os.fdopen(master_fd, "rb", 0)
+        )
+        self._transport = transport
         self._reader = reader
 
-    async def send_command(self, cmd: dict[str, object]) -> dict[str, object]:
+    async def send_command(
+        self, cmd: dict[str, object], timeout: float = 60.0
+    ) -> dict[str, object]:
         """Send a JSON command to the REPL and read the JSON response.
 
         The REPL outputs pretty-printed (multi-line) JSON, so we read lines
         until the accumulated text forms a valid JSON object.  Commands are
         separated by blank lines per the REPL protocol.
+
+        Raises ``TimeoutError`` if no complete JSON response arrives within
+        *timeout* seconds.
         """
         proc = self._proc
         reader = self._reader
@@ -257,6 +267,11 @@ class LeanREPLProcess:
         proc.stdin.write(payload.encode("utf-8"))
         proc.stdin.flush()
 
+        return await asyncio.wait_for(self._read_json_response(reader), timeout=timeout)
+
+    @staticmethod
+    async def _read_json_response(reader: asyncio.StreamReader) -> dict[str, object]:
+        """Read lines from *reader* until a complete JSON object is assembled."""
         buf: list[str] = []
         depth = 0
         started = False
@@ -290,7 +305,10 @@ class LeanREPLProcess:
         await self.start()
 
     async def close(self) -> None:
-        """Terminate the REPL subprocess."""
+        """Terminate the REPL subprocess and release pty resources."""
+        if self._transport is not None:
+            self._transport.close()
+            self._transport = None
         if self._proc is not None:
             try:
                 self._proc.terminate()

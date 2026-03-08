@@ -1375,7 +1375,11 @@ class TestTreeSearchIntegration:
         create_calls: list[dict[str, Any]] = []
 
         async def tracking_create(
-            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+            prefix: list[str],
+            llm_client: Any,
+            max_nodes: int = 200,
+            beam_width: int = 5,
+            model: str | None = None,
         ) -> Any:
             create_calls.append(
                 {"prefix": prefix, "max_nodes": max_nodes, "beam_width": beam_width}
@@ -1413,7 +1417,11 @@ class TestTreeSearchIntegration:
         create_calls: list[Any] = []
 
         async def tracking_create(
-            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+            prefix: list[str],
+            llm_client: Any,
+            max_nodes: int = 200,
+            beam_width: int = 5,
+            model: str | None = None,
         ) -> Any:
             create_calls.append(True)
             return None
@@ -1437,7 +1445,11 @@ class TestTreeSearchIntegration:
         create_calls: list[Any] = []
 
         async def tracking_create(
-            prefix: list[str], llm_client: Any, max_nodes: int = 200, beam_width: int = 5
+            prefix: list[str],
+            llm_client: Any,
+            max_nodes: int = 200,
+            beam_width: int = 5,
+            model: str | None = None,
         ) -> Any:
             create_calls.append(True)
             return None

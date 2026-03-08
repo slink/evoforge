@@ -8,7 +8,6 @@ evolving turbulence damping functions f(Ri_g) against benchmark RANS cases.
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import math
@@ -19,7 +18,6 @@ from typing import Any
 import numpy as np
 
 from evoforge.backends.base import Backend
-from evoforge.backends.cfd.credit import assign_credit_cfd
 from evoforge.backends.cfd.ir import ClosureExpr, Ri_g, parse_closure_expr
 from evoforge.backends.cfd.solver_adapter import run_case_evolved
 from evoforge.core.config import CFDBackendConfig
@@ -160,13 +158,15 @@ class CFDBackend(Backend):
         # Penalty multiplier for physics violations
         penalty = 1.0 if diag.physics_ok else 0.5
 
-        # Build a NumPy-safe damping function
+        # Build a NumPy-safe damping function with NaN/Inf guard
         def damping_fn(
             ri: np.typing.NDArray[np.floating[Any]],
         ) -> np.typing.NDArray[np.floating[Any]]:
             # lambdify may return a scalar for constant expressions
             result = fn(ri)  # type: ignore[arg-type]
-            return np.broadcast_to(np.asarray(result, dtype=float), ri.shape).copy()
+            arr = np.broadcast_to(np.asarray(result, dtype=float), ri.shape).copy()
+            arr = np.where(np.isfinite(arr), arr, 0.0)
+            return arr
 
         # Run each benchmark case
         cases = self.config.benchmark_cases
@@ -245,26 +245,32 @@ class CFDBackend(Backend):
     def assign_credit(
         self, ir: Any, fitness: Fitness, diagnostics: Any, trace: Any
     ) -> list[Credit]:
-        """Ablation-based credit assignment for additive terms.
+        """Structure-based credit assignment for additive terms.
 
-        Since :meth:`evaluate` is async but this method is sync, we check
-        whether an event loop is already running.  If so we return an empty
-        list (the engine can call the async helper directly); otherwise we
-        use ``asyncio.run()``.
+        Assigns credit proportional to each additive term's contribution
+        based on expression complexity. Fully synchronous — works in async
+        context without needing nested event loops.
         """
         assert isinstance(ir, ClosureExpr)
-
-        async def _quick_eval(ablated: ClosureExpr) -> Fitness:
-            fit, _diag, _trace = await self.evaluate(ablated)
-            return fit
-
-        try:
-            asyncio.get_running_loop()
-            # Already inside an async context — cannot nest asyncio.run().
-            return []
-        except RuntimeError:
-            # No running loop — safe to use asyncio.run().
-            return asyncio.run(assign_credit_cfd(ir, fitness, _quick_eval))
+        terms = ir.additive_terms()
+        if len(terms) <= 1:
+            return [
+                Credit(location=0, score=fitness.primary, signal="single_term", confidence=0.5)
+            ]
+        total_complexity = max(ir.complexity(), 1)
+        credits: list[Credit] = []
+        for i, term in enumerate(terms):
+            term_complexity = _count_nodes_basic(term)
+            weight = term_complexity / total_complexity
+            credits.append(
+                Credit(
+                    location=i,
+                    score=fitness.primary * weight,
+                    signal=f"term_{i}_weight",
+                    confidence=0.3,
+                )
+            )
+        return credits
 
     # -- Validation ----------------------------------------------------------
 
@@ -487,6 +493,13 @@ class CFDBackend(Backend):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _count_nodes_basic(expr: Any) -> int:
+    """Count nodes in a SymPy expression tree."""
+    if not hasattr(expr, "args") or not expr.args:
+        return 1
+    return 1 + sum(_count_nodes_basic(a) for a in expr.args)
 
 
 def _classify_form(ir: ClosureExpr) -> str:

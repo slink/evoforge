@@ -13,6 +13,10 @@ from tokenize import TokenError
 
 import sympy
 from sympy import Add
+from sympy.parsing.sympy_parser import (
+    implicit_multiplication_application,
+    standard_transformations,
+)
 
 # Canonical symbol used throughout the CFD backend.
 Ri_g: sympy.Symbol = sympy.Symbol("Ri_g", nonnegative=True)
@@ -137,8 +141,13 @@ def parse_closure_expr(text: str) -> ClosureExpr | None:
         parsed = sympy.parse_expr(
             text,
             local_dict={"Ri_g": Ri_g},
+            transformations=standard_transformations + (implicit_multiplication_application,),
+            evaluate=False,
         )
         if not isinstance(parsed, sympy.Basic):
+            return None
+        # Reject expressions containing unsafe atoms (arbitrary function calls, etc.)
+        if not _expr_is_safe(parsed):
             return None
         # Ensure any Ri_g symbols carry the nonneg assumption by
         # substituting bare symbols that share the name.
@@ -152,5 +161,49 @@ def parse_closure_expr(text: str) -> ClosureExpr | None:
         TypeError,
         ValueError,
         TokenError,
+        IndexError,
     ):
         return None
+
+
+# Whitelist of safe SymPy types allowed in parsed expressions.
+_SAFE_ATOMS = (
+    sympy.Number,
+    sympy.Symbol,
+    sympy.Rational,
+    sympy.core.numbers.NegativeOne,
+    sympy.core.numbers.One,
+    sympy.core.numbers.Zero,
+    sympy.core.numbers.Half,
+)
+
+_SAFE_FUNCTIONS = frozenset(
+    {
+        "exp",
+        "log",
+        "sqrt",
+        "Abs",
+        "sign",
+        "sin",
+        "cos",
+        "tan",
+        "tanh",
+        "Pow",
+        "Add",
+        "Mul",
+    }
+)
+
+
+def _expr_is_safe(expr: sympy.Basic) -> bool:
+    """Return True if the expression tree contains only safe operations."""
+    for atom in expr.atoms(sympy.Function):
+        if type(atom).__name__ not in _SAFE_FUNCTIONS:
+            return False
+    # Check for applied undefined functions (metaclass-based in sympy)
+    for sub in expr.atoms(sympy.Function):
+        if type(sub).__name__ not in _SAFE_FUNCTIONS and isinstance(
+            sub, sympy.core.function.AppliedUndef
+        ):
+            return False
+    return True

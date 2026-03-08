@@ -56,12 +56,24 @@ class LLMClient:
         self._max_retries = max_retries
         self._base_delay = base_delay
         self._max_delay = max_delay
+        self._sync_client: anthropic.Anthropic | None = None
+        self._async_client: anthropic.AsyncAnthropic | None = None
 
     def _compute_delay(self, attempt: int) -> float:
         """Compute retry delay with exponential backoff, jitter, and cap."""
         delay = self._base_delay * (2**attempt)
         jitter = random.uniform(0, self._base_delay)
         return float(min(delay + jitter, self._max_delay))
+
+    def _get_sync_client(self) -> anthropic.Anthropic:
+        if self._sync_client is None:
+            self._sync_client = anthropic.Anthropic(api_key=self._api_key)
+        return self._sync_client
+
+    def _get_async_client(self) -> anthropic.AsyncAnthropic:
+        if self._async_client is None:
+            self._async_client = anthropic.AsyncAnthropic(api_key=self._api_key)
+        return self._async_client
 
     def generate(
         self,
@@ -72,7 +84,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API synchronously with exponential-backoff retry."""
-        client = anthropic.Anthropic(api_key=self._api_key)
+        client = self._get_sync_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -115,7 +127,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API asynchronously with exponential-backoff retry."""
-        client = anthropic.AsyncAnthropic(api_key=self._api_key)
+        client = self._get_async_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):

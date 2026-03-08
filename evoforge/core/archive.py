@@ -231,19 +231,24 @@ class Archive:
         fitness: Fitness,
         diagnostics_json: str,
     ) -> None:
-        """Store a fitness evaluation result."""
+        """Store a fitness evaluation result. Silently skips duplicates."""
+        from sqlalchemy.exc import IntegrityError
+
         async with self._session_factory() as session:
-            async with session.begin():
-                row = EvaluationRow(
-                    ir_hash=ir_hash,
-                    backend_version=backend_version,
-                    config_hash=config_hash,
-                    fitness_primary=fitness.primary,
-                    fitness_json=_fitness_to_json(fitness),
-                    diagnostics_json=diagnostics_json,
-                    created_at=time.time(),
-                )
-                session.add(row)
+            try:
+                async with session.begin():
+                    row = EvaluationRow(
+                        ir_hash=ir_hash,
+                        backend_version=backend_version,
+                        config_hash=config_hash,
+                        fitness_primary=fitness.primary,
+                        fitness_json=_fitness_to_json(fitness),
+                        diagnostics_json=diagnostics_json,
+                        created_at=time.time(),
+                    )
+                    session.add(row)
+            except IntegrityError:
+                pass  # duplicate (ir_hash, backend_version, config_hash)
 
     async def lookup_fitness(
         self, ir_hash: str, backend_version: str, config_hash: str

@@ -19,16 +19,25 @@ class Fitness:
 
     def dominates(self, other: Fitness) -> bool:
         """Pareto dominance: self dominates other iff at least as good on every
-        objective AND strictly better on at least one."""
+        objective AND strictly better on at least one.
+
+        Uses the union of both auxiliaries' numeric keys so dominance is
+        symmetric with respect to key presence.
+        """
+        # Union of numeric keys from both sides
         numeric_keys = sorted(
-            k for k in self.auxiliary if isinstance(self.auxiliary[k], (int, float))
+            k
+            for k in set(self.auxiliary) | set(other.auxiliary)
+            if isinstance(self.auxiliary.get(k, 0.0), (int, float))
+            or isinstance(other.auxiliary.get(k, 0.0), (int, float))
         )
-        all_values_self = [self.primary] + [
-            v for k in numeric_keys if isinstance((v := self.auxiliary[k]), (int, float))
-        ]
-        all_values_other = [other.primary] + [
-            v for k in numeric_keys if isinstance((v := other.auxiliary.get(k, 0.0)), (int, float))
-        ]
+        all_values_self = [self.primary]
+        all_values_other = [other.primary]
+        for k in numeric_keys:
+            sv = self.auxiliary.get(k, 0.0)
+            ov = other.auxiliary.get(k, 0.0)
+            all_values_self.append(sv if isinstance(sv, (int, float)) else 0.0)
+            all_values_other.append(ov if isinstance(ov, (int, float)) else 0.0)
 
         at_least_as_good = all(s >= o for s, o in zip(all_values_self, all_values_other))
         strictly_better_on_one = any(s > o for s, o in zip(all_values_self, all_values_other))

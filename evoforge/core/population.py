@@ -27,6 +27,8 @@ class PopulationManager:
         """
         if individual.ir_hash in self._individuals:
             return False
+        if len(self._individuals) >= self.max_size:
+            return False
         self._individuals[individual.ir_hash] = individual
         return True
 

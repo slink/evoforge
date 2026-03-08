@@ -52,9 +52,19 @@ class SearchMemory:
     # Public API
     # ------------------------------------------------------------------
 
-    def update(self, individuals: list[Individual], generation: int) -> None:
-        """Ingest a batch of individuals and update all memory state."""
-        best_fitness: float | None = None
+    def update(
+        self,
+        individuals: list[Individual],
+        generation: int,
+        population_best: float | None = None,
+    ) -> None:
+        """Ingest a batch of individuals and update all memory state.
+
+        *population_best*, if given, overrides the best fitness derived from
+        *individuals* for stagnation tracking, ensuring we track population-level
+        best rather than offspring-only best.
+        """
+        best_fitness: float | None = population_best
 
         for ind in individuals:
             if ind.fitness is None:

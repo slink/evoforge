@@ -136,6 +136,7 @@ class Backend(ABC):
         llm_client: Any,
         max_nodes: int = 200,
         beam_width: int = 5,
+        model: str | None = None,
     ) -> Any | None:
         """Create a tree search instance seeded from a tactic prefix.
 

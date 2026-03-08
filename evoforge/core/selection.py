@@ -306,11 +306,17 @@ class Lexicase(SelectionStrategy):
         elite_ids = {ind.id for ind in elites}
 
         remaining_needed = target_size - len(elites)
-        # Use lexicase selection to fill from combined pool
-        fill = [self._epsilon_lexicase_one(combined) for _ in range(remaining_needed)]
-        # Deduplicate: remove any elites that got re-selected
-        # (it's fine to have duplicates in fill, tournament also allows it)
-        _ = elite_ids  # keep reference alive for clarity
+        # Sample with deduplication to prevent population collapse
+        fill: list[Individual] = []
+        seen = set(elite_ids)
+        max_attempts = remaining_needed * 5
+        attempts = 0
+        while len(fill) < remaining_needed and attempts < max_attempts:
+            candidate = self._epsilon_lexicase_one(combined)
+            if candidate.ir_hash not in seen:
+                seen.add(candidate.ir_hash)
+                fill.append(candidate)
+            attempts += 1
 
         return elites + fill
 

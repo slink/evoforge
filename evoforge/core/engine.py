@@ -59,7 +59,7 @@ class ExperimentResult:
     metrics: dict[str, float]
 
 
-def _build_selection(config: EvoforgeConfig) -> SelectionStrategy:
+def _build_selection(config: EvoforgeConfig, backend: Any = None) -> SelectionStrategy:
     """Instantiate a selection strategy from config."""
     name = config.selection.strategy
     if name == "scalar_tournament":
@@ -69,8 +69,12 @@ def _build_selection(config: EvoforgeConfig) -> SelectionStrategy:
     if name == "lexicase":
         return Lexicase()
     if name == "map_elites":
-        # MAP-Elites requires grid dims — use a minimal fallback
-        return MAPElites(grid_dims={"default": ["a", "b"]})
+        # Use backend behavior_space if available; fall back to minimal grid
+        grid_dims: dict[str, list[str]] = {"default": ["a", "b"]}
+        if backend is not None and hasattr(backend, "behavior_space"):
+            space = backend.behavior_space()
+            grid_dims = {dim.name: list(dim.labels) for dim in space.dimensions}
+        return MAPElites(grid_dims=grid_dims)
     msg = f"Unknown selection strategy: {name}"
     raise ValueError(msg)
 
@@ -96,7 +100,7 @@ class EvolutionEngine:
 
         # Core components
         self.population = PopulationManager(max_size=config.population.size)
-        self._strategy = _build_selection(config)
+        self._strategy = _build_selection(config, backend)
         self._identity = IdentityPipeline(backend)
         self._cache = EvaluationCache(archive)
         self._evaluator = AsyncEvaluator(
@@ -404,7 +408,9 @@ class EvolutionEngine:
 
                     # Memory update
                     if not ablation.disable_memory:
-                        self._memory.update(credited_offspring, gen)
+                        self._memory.update(
+                            credited_offspring, gen, population_best=self._best_fitness()
+                        )
                         # Log cmd error patterns to search memory as dead ends
                         for ind in credited_offspring:
                             if ind.fitness is not None:
@@ -654,6 +660,14 @@ class EvolutionEngine:
         for ind in individuals:
             self.population.add(ind)
 
+    def _inject_via_survival(self, individuals: list[Individual]) -> None:
+        """Inject individuals through survival selection to maintain population invariants."""
+        pop_list = self.population.get_all()
+        survivors = self._strategy.survive(pop_list, individuals, self.config.population.elite_k)
+        self.population = PopulationManager(max_size=self.config.population.size)
+        for ind in survivors:
+            self.population.add(ind)
+
     def _gen_status(
         self, gen: int, best_fit: float | None = None, diversity: float | None = None
     ) -> str:
@@ -767,6 +781,7 @@ class EvolutionEngine:
             llm_client=self.llm_client,
             max_nodes=self.config.evolution.tree_search_max_nodes,
             beam_width=self.config.evolution.tree_search_beam_width,
+            model=self.config.llm.model,
         )
         if searcher is None:
             logger.debug("Tree search: backend.create_tree_search() returned None")
@@ -784,7 +799,7 @@ class EvolutionEngine:
                 self._assign_credits(evaluated)
                 await self._verify_perfect_individuals(evaluated)
                 self._assign_behavior_descriptors(evaluated)
-                self._add_to_population(evaluated)
+                self._inject_via_survival(evaluated)
         elif result is not None:
             logger.info(
                 "Tree search exhausted budget (%d nodes), best partial: %d steps",
@@ -798,7 +813,7 @@ class EvolutionEngine:
                 self._total_evaluations += len(evaluated)
                 self._assign_credits(evaluated)
                 self._assign_behavior_descriptors(evaluated)
-                self._add_to_population(evaluated)
+                self._inject_via_survival(evaluated)
 
     async def _reflect(self, generation: int) -> None:
         """Call the LLM for a reflection, parse the result into memory."""
@@ -889,16 +904,16 @@ class EvolutionEngine:
         if data is None:
             return None
 
-        checkpoint_gen: int = data["generation"]
+        checkpoint_gen: int = data.get("generation", 0)
         logger.info("Resuming from checkpoint at generation %d", checkpoint_gen)
 
-        # Restore scalar state
-        self._total_evaluations = data["total_evaluations"]
-        self._reflected = data["reflected"]
-        self._temperature = data["temperature"]
-        self._temperature_boost = data["temperature_boost"]
-        self._dedup_count = data["dedup_count"]
-        self._total_offspring_attempted = data["total_offspring_attempted"]
+        # Restore scalar state (use .get() for forward compatibility)
+        self._total_evaluations = data.get("total_evaluations", 0)
+        self._reflected = data.get("reflected", False)
+        self._temperature = data.get("temperature", self.config.llm.temperature)
+        self._temperature_boost = data.get("temperature_boost", 0.0)
+        self._dedup_count = data.get("dedup_count", 0)
+        self._total_offspring_attempted = data.get("total_offspring_attempted", 0)
 
         # Restore memory
         self._memory.from_dict(data["memory"])

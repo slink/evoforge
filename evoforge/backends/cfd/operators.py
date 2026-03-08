@@ -63,7 +63,10 @@ class ConstantPerturb(MutationOperator):
         factor = 1.0 + random.gauss(0.0, 0.15)
         new_val = sympy.nsimplify(float(target) * factor)
         new_expr = ir.expr.subs(target, new_val)
-        return str(new_expr)
+        result_str = str(new_expr)
+        if not _validate_mutation(result_str):
+            return parent.genome
+        return result_str
 
 
 class SubtreeMutate(MutationOperator):
@@ -130,4 +133,25 @@ class TermAddRemove(MutationOperator):
         fragment = random.choice(_FRAGMENTS)
         new_term = sympy.nsimplify(coeff) * fragment
         new_expr = ir.expr + new_term
-        return str(new_expr)
+        result_str = str(new_expr)
+        if not _validate_mutation(result_str):
+            return parent.genome
+        return result_str
+
+
+def _validate_mutation(genome_str: str) -> bool:
+    """Validate that a mutated expression is physically plausible.
+
+    Checks that the expression parses, uses only Ri_g, and f(0) ≈ 1.
+    """
+    ir = parse_closure_expr(genome_str)
+    if ir is None or not ir.free_symbols_ok():
+        return False
+    try:
+        fn = ir.lambdify()
+        f0 = fn(0.0)
+        if not (isinstance(f0, (int, float)) and abs(f0 - 1.0) < 0.2):
+            return False
+    except Exception:
+        return False
+    return True

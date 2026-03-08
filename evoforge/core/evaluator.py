@@ -32,8 +32,9 @@ class EvaluationCache:
              (ir_hash, backend_version, config_hash).
     """
 
-    def __init__(self, archive: Any | None = None) -> None:
+    def __init__(self, archive: Any | None = None, max_parse_cache: int = 10_000) -> None:
         self._archive = archive
+        self._max_parse_cache = max_parse_cache
         # L1: in-memory parse cache
         self._parse_cache: dict[str, Any] = {}
 
@@ -49,6 +50,10 @@ class EvaluationCache:
         if cached is not _SENTINEL:
             return cached
         result = parse_fn(genome)
+        # Evict oldest entries when cache is full (FIFO via dict ordering)
+        if len(self._parse_cache) >= self._max_parse_cache:
+            oldest = next(iter(self._parse_cache))
+            del self._parse_cache[oldest]
         self._parse_cache[genome] = result
         return result
 
@@ -139,7 +144,7 @@ class AsyncEvaluator:
             diagnostics_json,
         )
 
-        return replace(individual, fitness=fitness)
+        return replace(individual, fitness=fitness, diagnostics=diagnostics)
 
     async def evaluate_batch(self, individuals: list[Individual]) -> list[Individual]:
         """Evaluate a batch of individuals with bounded concurrency."""
