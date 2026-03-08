@@ -8,6 +8,7 @@ evolving turbulence damping functions f(Ri_g) against benchmark RANS cases.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import math
@@ -18,6 +19,7 @@ from typing import Any
 import numpy as np
 
 from evoforge.backends.base import Backend
+from evoforge.backends.cfd.credit import assign_credit_cfd
 from evoforge.backends.cfd.ir import ClosureExpr, Ri_g, parse_closure_expr
 from evoforge.backends.cfd.solver_adapter import run_case_evolved
 from evoforge.core.config import CFDBackendConfig
@@ -243,8 +245,26 @@ class CFDBackend(Backend):
     def assign_credit(
         self, ir: Any, fitness: Fitness, diagnostics: Any, trace: Any
     ) -> list[Credit]:
-        """Placeholder — returns empty list (Task 5)."""
-        return []
+        """Ablation-based credit assignment for additive terms.
+
+        Since :meth:`evaluate` is async but this method is sync, we check
+        whether an event loop is already running.  If so we return an empty
+        list (the engine can call the async helper directly); otherwise we
+        use ``asyncio.run()``.
+        """
+        assert isinstance(ir, ClosureExpr)
+
+        async def _quick_eval(ablated: ClosureExpr) -> Fitness:
+            fit, _diag, _trace = await self.evaluate(ablated)
+            return fit
+
+        try:
+            asyncio.get_running_loop()
+            # Already inside an async context — cannot nest asyncio.run().
+            return []
+        except RuntimeError:
+            # No running loop — safe to use asyncio.run().
+            return asyncio.run(assign_credit_cfd(ir, fitness, _quick_eval))
 
     # -- Validation ----------------------------------------------------------
 
@@ -288,8 +308,14 @@ class CFDBackend(Backend):
     # -- Mutation operators --------------------------------------------------
 
     def mutation_operators(self) -> list[Any]:
-        """Placeholder — returns empty list (Task 6)."""
-        return []
+        """Return cheap mutation operators for closure expressions."""
+        from evoforge.backends.cfd.operators import (
+            ConstantPerturb,
+            SubtreeMutate,
+            TermAddRemove,
+        )
+
+        return [ConstantPerturb(), SubtreeMutate(), TermAddRemove()]
 
     # -- LLM prompts ---------------------------------------------------------
 
