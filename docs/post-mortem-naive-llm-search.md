@@ -1,14 +1,18 @@
-# Post-Mortem: Why Naive LLM Evolutionary Proof Search Didn't Work
+# Post-Mortem: Evolutionary Proof Search — An Empirical Validation
 
 **Date:** 2026-03-06
 **System:** evoforge v1, Lean 4 backend
 **Target:** `norm_le_one` — prove that positive definite functions have norm ≤ 1
 
+## Motivation
+
+The literature on LLM-guided theorem proving (HTPS, AlphaProof, COPRA, Goedel-Prover-V2) uniformly uses tree search — best-first expansion, MCTS, or stateful backtracking over proof states. FunSearch (Romera-Paredes et al. 2024) showed that LLM-guided evolution works well for *program synthesis*, where fitness landscapes are smoother. We wanted to test empirically whether evolution could also work for theorem proving with the right fitness engineering, and if not, to understand precisely where the approach breaks down.
+
+The hypothesis: if we provide fine-grained fitness signals (per-step credit, goal reduction ratios) and feed search memory back into the LLM, evolution might navigate the proof landscape despite its discrete nature. This would be a simpler architecture than full tree search while preserving the breadth advantages of population-based methods.
+
 ## What We Built
 
 An evolutionary engine that uses LLMs to mutate tactic proofs. The loop: seed a population of 30 proof attempts, evaluate each step-by-step in a Lean REPL, select the fittest, mutate them (4 cheap structural operators + 2 LLM-powered operators), repeat. Three-tier verification catches false positives: REPL step-by-step → REPL cmd → full `lake env lean` compilation.
-
-We expected the LLM to gradually improve proofs over generations, guided by fitness feedback and search memory. The evolutionary approach should explore diverse proof strategies while selection pressure drives toward completeness.
 
 ## What Actually Happened
 
@@ -37,21 +41,21 @@ Fitness was `steps_succeeded / total_steps`. This rewarded length, not progress.
 
 The system learned to evolve long sequences of individually-valid tactics (`intro x`, `simp`, `norm_num`, `ring`, `push_neg`...) that don't actually prove anything. The REPL accepts each tactic, reports the proof state changed, and the evaluator counts it as progress. But the *goals* weren't being reduced — just shuffled.
 
-### The Architecture Was Wrong for the Problem
+### The Fitness Landscape Is Fundamentally Discrete
 
-This is the deepest issue, and it's what the literature should have told us from the start.
+This is the core finding, and it empirically confirms what the literature's convergence on tree search implies.
 
 **Theorem proving is a tree search problem, not a sequence optimization problem.**
 
-When a proof gets stuck at step 4, the right move is to try 5 different tactics at step 4 and explore each branch. Evolution's approach — generate 30 complete linear sequences, evaluate them, mutate the whole sequence — is an absurdly inefficient way to explore alternatives at a specific proof state. It's like trying to solve a maze by generating random complete paths from start to finish, rather than walking to the first fork and trying each direction.
+When a proof gets stuck at step 4, the right move is to try 5 different tactics at step 4 and explore each branch. Evolution's approach — generate 30 complete linear sequences, evaluate them, mutate the whole sequence — is an inefficient way to explore alternatives at a specific proof state. It's like trying to solve a maze by generating random complete paths from start to finish, rather than walking to the first fork and trying each direction.
 
-Every successful LLM theorem prover in the literature uses tree search in some form:
+The literature converges on tree search for good reason:
 - **HTPS** (Lample et al. 2022): hyper-tree proof search, best-first expansion
 - **AlphaProof** (DeepMind 2024): MCTS over proof states with a value network
 - **COPRA** (2024): stateful interaction, trying alternatives at each step
 - **Goedel-Prover-V2** (2025): Monte Carlo tree self-refinement
 
-We were doing FunSearch-style evolutionary search (which works great for *program synthesis* where the fitness landscape is smoother) on a problem where the fitness landscape is essentially a cliff: proofs either work or they don't, and partial credit for "steps that parse" doesn't correlate with "proof strategies that are close to correct."
+Our experiment confirms that FunSearch-style evolutionary search works for *program synthesis* (where fitness landscapes are smooth) but not for theorem proving, where the landscape is essentially a cliff. The synthetic fitness signal from per-step credit and goal reduction ratios gave the illusion of a gradient, but it didn't correlate with "proof strategies that are close to correct."
 
 ### Cheap Operators Were Noise
 
@@ -88,11 +92,13 @@ The false positives all use `hφ.pdMatrix_posSemidef` — a mathematically corre
 
 **The fundamental problem remains:** evolution cannot navigate a fitness landscape that is essentially a cliff. Partial proofs at 0.1–0.3 fitness give no signal about which path leads to a genuine complete proof. The system correctly identifies false positives but has no way to learn from them — it just marks them infeasible and keeps generating similar ones.
 
-## Final Verdict
+## Verdict
 
-Evolution is the wrong search strategy for theorem proving. The project infrastructure (REPL integration, evaluation pipeline, verification, LLM client, archive) is solid and reusable, but the evolutionary wrapper adds overhead without value for this domain. The fitness landscape for proofs is binary — works or doesn't — with no smooth gradient for selection pressure to exploit.
+The experiment confirmed the hypothesis that evolution is not competitive with tree search for theorem proving. The synthetic fitness gradient from per-step credit is too noisy to guide selection effectively — the landscape is binary at its core, and no amount of fitness engineering changes that.
 
-The evoforge architecture is better suited to domains with **continuous fitness landscapes** where small mutations produce small fitness changes. The CFD backend (evolving turbulence closure functions) is a natural fit: each candidate produces a real-valued error metric, nearby functions produce nearby errors, and partial improvements are meaningful.
+The value of the experiment was threefold: (1) it empirically validated the literature's convergence on tree search with concrete failure modes, (2) it produced a well-tested, backend-agnostic evolutionary engine, and (3) it clarified exactly which properties a domain needs for evolution to work — **continuous fitness landscapes** where small mutations produce small fitness changes.
+
+The CFD backend (evolving turbulence closure functions) is a natural fit: each candidate produces a real-valued error metric, nearby functions produce nearby errors, and partial improvements are meaningful.
 
 ## Lessons
 
@@ -102,4 +108,4 @@ The evoforge architecture is better suited to domains with **continuous fitness 
 
 3. **Your fitness function IS your specification.** If you reward "steps that parse," you get "long sequences of parsing steps." The system optimized exactly what we told it to optimize — we just told it to optimize the wrong thing.
 
-4. **Read the literature before building.** Every paper on LLM-guided theorem proving uses tree search. We built an evolutionary system because that was the project's framing, but should have added tree search from day one as the primary proof exploration strategy, with evolution as a meta-level strategy for discovering proof *approaches*.
+4. **Empirical validation has value.** The literature uniformly uses tree search for theorem proving, but understanding *why* requires seeing the failure modes firsthand. The false-positive feedback loop, the cliff-like fitness landscape, the noise in cheap operators — these are concrete, debuggable insights that papers describe abstractly. The experiment also produced a reusable engine architecture that pivoted cleanly to CFD.

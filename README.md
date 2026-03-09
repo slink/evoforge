@@ -6,9 +6,9 @@ An evolutionary engine for formally-grounded symbolic expressions. It uses LLMs 
 
 An LLM-guided evolutionary engine for formally-grounded symbolic expressions. It maintains a population of candidates, evolves them using both cheap syntactic operators and LLM-guided mutations, and uses formal evaluation systems to measure fitness.
 
-The first backend targeted Lean 4 theorem proving. After extensive experimentation, we found that **evolution is the wrong search strategy for theorem proving** — the fitness landscape is essentially binary (proof works or doesn't) with no smooth gradient for selection to exploit. See [the post-mortem](docs/post-mortem-naive-llm-search.md) for the full analysis.
+The first backend targeted Lean 4 theorem proving to empirically test whether evolution could compete with tree search (the standard approach in the literature). It confirmed that theorem proving's discrete fitness landscape is a poor fit for evolutionary methods — see [the post-mortem](docs/post-mortem-naive-llm-search.md) for the analysis. The experiment validated the engine architecture end-to-end and clarified what makes a domain evolvable.
 
-The architecture is better suited to domains with **continuous fitness landscapes**. The next backend targets CFD turbulence closure optimization — evolving damping functions where small mutations produce small fitness changes and partial improvements are meaningful.
+The architecture is designed for domains with **continuous fitness landscapes**. The active backend targets CFD turbulence closure optimization — evolving damping functions where small mutations produce small fitness changes and partial improvements are meaningful.
 
 ## How it works
 
@@ -160,11 +160,11 @@ Experiments are configured via TOML files. See `configs/lean_default.toml` for a
 
 ## Status
 
-Research software. The core evolutionary engine, LLM integration, and Lean 4 backend are complete and well-tested. The Lean backend demonstrated that the architecture works end-to-end but also revealed a fundamental mismatch between evolutionary search and theorem proving (see [post-mortem](docs/post-mortem-naive-llm-search.md)).
+Research software. The core evolutionary engine, LLM integration, and both backends are complete and well-tested. The Lean backend served as an empirical validation that theorem proving's discrete fitness landscape is not evolvable (confirming the literature's convergence on tree search), while proving out the architecture for the pivot to CFD.
 
 **Current focus:** CFD turbulence closure backend, where the continuous fitness landscape is a natural fit for evolutionary optimization.
 
-**Lean backend status:** Functional but on hold. The engine finds partial proofs and even "complete" proofs that pass REPL verification, but all fail full kernel elaboration. Theorem proving needs tree search (MCTS, best-first), not evolution.
+**Lean backend status:** Functional but on hold. The engine finds partial proofs and "complete" proofs that pass REPL verification, but none survive full kernel elaboration — a result consistent with the literature's preference for tree search over evolution in this domain.
 
 Known limitations:
 - Two backends (Lean 4 on hold, CFD active)

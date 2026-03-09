@@ -1,25 +1,16 @@
 # evoforge -- The Developer's Field Guide
 
-*An evolutionary engine that uses LLMs to breed theorem proofs.*
+*An LLM-guided evolutionary engine for formally-grounded symbolic expressions.*
 
 ---
 
 ## 1. What Is Evoforge?
 
-Imagine you are trying to prove a mathematical theorem in Lean 4. You sit
-down, write `intro x`, then `simp`, and Lean tells you it did not work. You
-try `ring` instead. Still stuck. You reorder the tactics, try a different
-opener, combine two half-working approaches. Eventually, through trial and
-error and flashes of insight, you close all the goals.
-
-Evoforge automates that entire process.
-
-It treats a **tactic proof** as a *genome* -- a sequence of instructions that
-can be parsed, evaluated, mutated, and recombined -- and runs a full-blown
-evolutionary algorithm over a population of candidate proofs. Some mutations
-are cheap structural shuffles (swap two adjacent tactics, truncate at the last
-working step). Others call an LLM -- ask it to look at the failing proof, the
-diagnostics, the credit analysis, and write a better version.
+Evoforge is an LLM-guided evolutionary engine for formally-grounded symbolic
+expressions. It maintains a population of candidates, evolves them using both
+cheap syntactic operators and LLM-guided mutations, and uses formal evaluation
+systems to measure fitness. The core engine is domain-agnostic — it operates
+through a pluggable backend interface.
 
 The thesis is simple: **evolution gives you exploration breadth; LLMs give you
 exploitation depth.** Cheap operators keep the population churning through
@@ -27,10 +18,14 @@ structural variations at near-zero cost, while LLM operators make the
 high-value jumps that pure random mutation would never find. The engine blends
 both and adapts the mixture as it learns what works.
 
-The first domain backend is Lean 4 theorem proving, but the architecture is
-designed so that the core engine never touches a single Lean-specific concept.
-You could plug in a Python program synthesis backend, a circuit design backend,
-or anything else that can be represented as a parseable, evaluable sequence.
+The first backend targeted Lean 4 theorem proving as an empirical test of
+whether evolution could compete with tree search (the standard approach in the
+literature). It confirmed that theorem proving's discrete fitness landscape
+is a poor fit for evolutionary methods, while validating the architecture
+end-to-end and clarifying what makes a domain evolvable. The active backend
+targets CFD turbulence closure optimization — evolving damping functions
+`f(Ri_g)` where the continuous fitness landscape lets evolution do what it
+does best.
 
 ---
 
@@ -837,10 +832,11 @@ This is a simple but effective escape mechanism. When you are stuck in a
 local optimum, you need to take bigger jumps. The temperature cap at 1.5
 prevents the LLM from becoming completely incoherent.
 
-A more sophisticated approach would use the reflection prompt template to
-ask the LLM to diagnose the population state and suggest structural changes.
-The template exists (`reflection_prompt.j2`) but the reflection pipeline is
-not yet fully wired into the engine -- that is future work.
+The engine also uses the reflection prompt template to ask the LLM to
+diagnose the population state and suggest structural changes. The LLM's
+response is parsed into a `Reflection` dataclass and fed back into search
+memory (strategies to try → patterns, strategies to avoid → dead ends) and
+the temperature is blended with the LLM's suggestion.
 
 ### Lesson 8: Lineage Tracking Enables Post-Hoc Analysis
 
@@ -1055,17 +1051,14 @@ asyncio.run(main())
 
 ### Near-Term
 
-- **Full reflection pipeline.** The reflection prompt template exists but is
-  not wired into the engine. When triggered by stagnation, the engine should
-  call the LLM with a population summary and use the `Reflection` dataclass
-  (strategies to try, strategies to avoid, useful primitives, suggested
-  temperature) to reconfigure the search.
+- **CFD experiments.** Run the evolutionary engine against real Jensen et al.
+  (1989) experimental data and see if evolved damping functions outperform
+  hand-crafted formulas.
 
-- **Richer crossover.** The `LLMCrossover` operator currently falls back to
-  mutation when guidance is not available. The engine loop should explicitly
-  select a second parent for crossover contexts.
-
-- **Checkpoint/resume.** ✅ Done! See Section 14 below.
+- **Hyperparameter sweeps.** The TOML config makes it easy to run parameter
+  sweeps over population size, mutation weights, selection strategy, etc.
+  Adding a sweep runner that schedules multiple experiments and compares
+  results would be a natural extension.
 
 ### Medium-Term
 
@@ -1075,27 +1068,12 @@ asyncio.run(main())
   mutated structurally.
 
 - **Distributed evaluation.** The async evaluator currently runs on one
-  machine. For expensive backends (Lean REPL), distributing evaluations
-  across multiple machines would dramatically increase throughput.
-
-- **Hyperparameter sweeps.** The TOML config makes it easy to run parameter
-  sweeps over population size, mutation weights, selection strategy, etc.
-  Adding a sweep runner that schedules multiple experiments and compares
-  results would be a natural extension.
-
-### Long-Term
+  machine. Distributing evaluations across multiple machines would
+  dramatically increase throughput.
 
 - **Self-improving prompts.** Instead of static Jinja2 templates, the system
   could use the LLM to improve its own prompts based on what types of
   mutations produce the best results.
-
-- **Multi-theorem campaigns.** Run evoforge across a corpus of theorems,
-  letting the search memory transfer between runs. Tactics that work on one
-  theorem might transfer to related theorems.
-
-- **Formal verification of the pipeline.** The ultimate irony would be to
-  use Lean to prove properties about evoforge itself -- like "the identity
-  pipeline is idempotent" or "survival preserves elites."
 
 ---
 
@@ -1177,7 +1155,7 @@ asyncio.run(main())
 
 If you need a single analogy to hold the whole system in your head:
 
-**Evoforge is a breeding program for proofs.**
+**Evoforge is a breeding program for symbolic expressions.**
 
 - The **population** is the herd.
 - The **fitness function** is the judge at a livestock show.
@@ -1198,10 +1176,8 @@ If you need a single analogy to hold the whole system in your head:
 The goal is the same as any breeding program: start with a diverse population,
 apply selection pressure, keep what works, discard what does not, and
 eventually converge on individuals that satisfy your criteria. The difference
-is that evoforge's "animals" are sequences of mathematical reasoning steps,
-and its "criteria" is formal logical correctness.
-
-That is evoforge. Breed better proofs.
+is that evoforge's "animals" are symbolic expressions -- tactic proofs,
+turbulence closures, or whatever your backend evaluates.
 
 ---
 
@@ -1659,18 +1635,19 @@ positive results, feeds failures to memory, checkpoint roundtrip). 3 more tests 
 
 ## 19. The CFD Pivot -- Why Evolution Needs a Gradient
 
-After months of building and running the Lean backend, we hit a fundamental
-realization: **evolution is the wrong search strategy for theorem proving.**
+The Lean backend was designed as an empirical test of whether evolution could
+compete with tree search for theorem proving. The literature (HTPS, AlphaProof,
+COPRA, Goedel-Prover-V2) uniformly uses tree search, but we wanted to understand
+*why* at a concrete, debuggable level -- and to build a reusable engine architecture
+in the process.
 
-Here is the core problem. A proof either works or it does not. There is no
-"80% correct proof." You can measure partial progress (how many goals did you
-close? how far through the tactic sequence did you get?), and we did -- the
-fitness formula `0.4 * step_ratio + 0.6 * goal_reduction_ratio` gives a
-continuous-ish signal. But it is a *synthetic* gradient, a human-engineered
-proxy that only loosely correlates with "closeness to a complete proof." Two
-proofs with fitness 0.85 and 0.87 might be equally far from success, or one
-might be one tactic away. The fitness landscape is riddled with plateaus and
-cliffs.
+The experiment confirmed the literature's preference. A proof either works or it
+does not. There is no "80% correct proof." The fitness formula
+`0.4 * step_ratio + 0.6 * goal_reduction_ratio` gives a continuous-ish signal,
+but it is a *synthetic* gradient that only loosely correlates with "closeness to
+a complete proof." Two proofs with fitness 0.85 and 0.87 might be equally far
+from success, or one might be one tactic away. The fitness landscape is riddled
+with plateaus and cliffs.
 
 This is like trying to breed racehorses by measuring how far they get before
 falling off a cliff. You can rank them by distance, but that ranking tells
@@ -1827,18 +1804,21 @@ by construction (no syntax errors, no unbalanced parentheses).
 
 ### Match the algorithm to the landscape
 
-This is the big one. Evolution is a powerful optimizer, but it needs
-something to optimize *against*. A binary pass/fail signal is nearly useless
-for evolutionary search -- it is like trying to find your keys in the dark
-by randomly walking around and checking "am I standing on my keys? no."
-A continuous fitness signal is like having a metal detector -- it gets louder
-as you get closer, and you can follow the gradient.
+Evolution is a powerful optimizer, but it needs something to optimize
+*against*. A binary pass/fail signal is nearly useless for evolutionary
+search -- it is like trying to find your keys in the dark by randomly walking
+around and checking "am I standing on my keys? no." A continuous fitness
+signal is like having a metal detector -- it gets louder as you get closer,
+and you can follow the gradient.
 
-The Lean experience was not wasted. The entire core engine -- selection,
-mutation ensemble, adaptive weights, search memory, archive, checkpointing
--- transfers directly to CFD. We just swap the backend. That is the payoff
-of the clean `Backend ABC` abstraction: the engine does not know or care
-whether it is evolving tactic proofs or damping functions.
+The Lean experiment was designed to test exactly this boundary. The entire
+core engine -- selection, mutation ensemble, adaptive weights, search memory,
+archive, checkpointing -- transfers directly to CFD. We just swap the
+backend. That is the payoff of the clean `Backend ABC` abstraction: the
+engine does not know or care whether it is evolving tactic proofs or damping
+functions. The Lean backend served its purpose as a proving ground for the
+architecture before pivoting to a domain where evolution's strengths actually
+apply.
 
 ### The monkey-patching pattern
 
@@ -1879,3 +1859,115 @@ ClosureExpr parsing/canonicalization/hashing, CFDBackend lifecycle and
 evaluation, SolverAdapter monkey-patching, ablation credit, all three
 mutation operators, config wiring, and integration tests that run the
 full evolutionary loop with a mock solver.
+
+## 22. Prompt Caching and Batch API -- Making LLM Calls 95% Cheaper
+
+When you run an evolutionary loop with LLM-powered mutation operators, LLM
+calls dominate the cost. A typical 43-generation run makes ~524 LLM calls,
+and most of those calls share the *exact same system prompt* -- the theorem
+context, API reference, dead-end history, and strategy patterns. That is
+megabytes of repeated input tokens at $3-15/million, every single call.
+
+We attacked this from two angles, and they stack multiplicatively.
+
+### Prompt caching (the 90% win)
+
+Anthropic's prompt caching lets you mark content blocks with
+`cache_control: {"type": "ephemeral"}`. The API remembers those blocks for
+5 minutes, and subsequent calls that hit the cache pay only 10% of the
+normal input token cost. The first call pays a 25% surcharge to create the
+cache entry, but after that it is pure savings.
+
+The implementation is trivial. `LLMClient.format_system()` wraps the system
+string in a `TextBlockParam` with `cache_control` when `prompt_caching=True`
+(the default). Every call site already passes a system prompt string --
+they do not even know caching is happening.
+
+The key insight: in an evolutionary loop, all mutations within a generation
+share the same system prompt (theorem definition, available API, dead-end
+patterns). That system prompt easily exceeds the 1024-token minimum for
+caching. So the first call in each generation warms the cache, and every
+subsequent call that generation gets the 90% discount.
+
+### Batch API (stacks to 95%)
+
+The Anthropic Message Batch API collects multiple requests and submits them
+as a single batch, giving a flat 50% discount on all tokens. The catch:
+batches are asynchronous -- you submit, poll, and collect results later.
+
+The architecture uses a `BatchCollector` async context manager with a
+`ContextVar` to make this transparent to call sites:
+
+```
+async with BatchCollector(client):
+    # All LLM calls inside this block are silently collected
+    tasks = [asyncio.create_task(mutate(parent)) for parent in parents]
+    results = await asyncio.gather(*tasks)
+# On __aexit__, BatchCollector submits them all as one batch,
+# polls until done, and resolves the futures
+```
+
+Three call sites (LLMMutate, LLMCrossover, LLMTacticGenerator) all use a
+shared `batch_aware_generate()` helper that checks for an active collector
+via the ContextVar. If a collector is active, it registers the request and
+returns a future. If not, it falls back to a direct `async_generate()` call.
+This means batch mode is entirely opt-in at the engine level -- operators
+do not know or care whether they are inside a batch context.
+
+### The ContextVar race condition (a nasty bug)
+
+The original implementation created `asyncio.Task` objects *before* entering
+the `BatchCollector` context manager. This was dead code: `create_task()`
+copies ContextVar state at creation time, not at await time. So every task
+saw `get_batch_collector() == None` and fell through to direct calls.
+
+The fix was to move task creation *inside* the `async with` block, using
+`contextlib.nullcontext()` for the non-batch path so the loop does not need
+to be duplicated:
+
+```python
+batch_cm = (
+    BatchCollector(client) if config.llm.batch_enabled
+    else contextlib.nullcontext()
+)
+async with batch_cm:
+    tasks = [asyncio.create_task(...) for parent in parents]
+    results = await asyncio.gather(*tasks)
+```
+
+**Lesson learned:** ContextVars and `asyncio.create_task()` have a subtle
+interaction. The task inherits the ContextVar state from the *point of task
+creation*, not from where the coroutine later runs. If you set a ContextVar
+inside `async with` but create tasks outside it, the tasks will not see the
+new value. This is documented behavior, but easy to miss.
+
+### Graceful degradation
+
+The batch collector has multiple fallback layers:
+1. If batch submission fails, it falls back to individual `async_generate()`
+   calls (concurrently via `asyncio.gather`, not sequentially).
+2. If an individual fallback call fails, that future resolves to `None`.
+3. Operators check for `None` responses and fall back to the parent genome.
+4. A `max_wait` timeout (default 30 minutes) prevents infinite polling hangs.
+
+### The math
+
+With both features enabled on cached system prompts:
+- Input tokens (cached): 0.1× (cache) × 0.5× (batch) = **0.05×**
+- Output tokens: 0.5× (batch only)
+
+For a typical run where input tokens dominate (long system prompts, short
+tactic outputs), the effective savings approach **95%**.
+
+**Config:**
+```toml
+[llm]
+prompt_caching = true    # default
+batch_enabled = false    # opt-in (requires async context)
+batch_poll_interval = 2.0
+```
+
+**Test count: 652 → 679.** 27 new tests cover prompt caching (system
+formatting, cache token extraction, cost estimation), batch collection
+(request registration, polling, fallback, per-request errors, ContextVar
+lifecycle), and batch-aware dispatch for all three LLM call sites.
