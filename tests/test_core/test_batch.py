@@ -204,68 +204,32 @@ class TestBatchConfigFields:
 
 class TestTacticGeneratorBatchAware:
     @pytest.mark.asyncio
-    async def test_registers_with_batch_when_active(self) -> None:
-        import asyncio
-
+    async def test_uses_batch_aware_generate(self) -> None:
         from evoforge.backends.lean.tactic_generator import LLMTacticGenerator
         from tests.conftest import FakeLLMResponse
 
         client = MagicMock()
-        client.async_generate = AsyncMock()
-
-        mock_collector = MagicMock()
-        future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
-        future.set_result(FakeLLMResponse(text="1. simp\n2. ring\n3. linarith"))
-        mock_collector.register = MagicMock(return_value=future)
-
         gen = LLMTacticGenerator(client, "test-model", "system prompt")
 
         with patch(
-            "evoforge.backends.lean.tactic_generator.get_batch_collector",
-            return_value=mock_collector,
-        ):
+            "evoforge.backends.lean.tactic_generator.batch_aware_generate",
+            new=AsyncMock(return_value=FakeLLMResponse(text="1. simp\n2. ring\n3. linarith")),
+        ) as mock_gen:
             tactics = await gen.suggest_tactics("⊢ x = x", [], 3)
 
-        mock_collector.register.assert_called_once()
-        client.async_generate.assert_not_called()
-        assert len(tactics) > 0
-
-    @pytest.mark.asyncio
-    async def test_direct_call_when_no_batch(self) -> None:
-        from evoforge.backends.lean.tactic_generator import LLMTacticGenerator
-        from tests.conftest import FakeLLMResponse
-
-        client = MagicMock()
-        client.async_generate = AsyncMock(return_value=FakeLLMResponse(text="1. simp\n2. ring"))
-
-        gen = LLMTacticGenerator(client, "test-model", "system prompt")
-
-        with patch(
-            "evoforge.backends.lean.tactic_generator.get_batch_collector",
-            return_value=None,
-        ):
-            tactics = await gen.suggest_tactics("⊢ x = x", [], 3)
-
-        client.async_generate.assert_called_once()
-        assert len(tactics) > 0
+        mock_gen.assert_called_once()
+        assert tactics == ["simp", "ring", "linarith"]
 
     @pytest.mark.asyncio
     async def test_batch_returns_none_returns_empty(self) -> None:
-        import asyncio
-
         from evoforge.backends.lean.tactic_generator import LLMTacticGenerator
 
         client = MagicMock()
-        mock_collector = MagicMock()
-        future: asyncio.Future[Any] = asyncio.get_event_loop().create_future()
-        future.set_result(None)
-        mock_collector.register = MagicMock(return_value=future)
-
         gen = LLMTacticGenerator(client, "test-model", "system prompt")
 
         with patch(
-            "evoforge.backends.lean.tactic_generator.get_batch_collector",
-            return_value=mock_collector,
+            "evoforge.backends.lean.tactic_generator.batch_aware_generate",
+            new=AsyncMock(return_value=None),
         ):
             tactics = await gen.suggest_tactics("⊢ x = x", [], 3)
 

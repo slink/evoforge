@@ -65,7 +65,7 @@ class LLMClient:
         self._sync_client: anthropic.Anthropic | None = None
         self._async_client: anthropic.AsyncAnthropic | None = None
 
-    def _format_system(self, system: str) -> str | list[TextBlockParam]:
+    def format_system(self, system: str) -> str | list[TextBlockParam]:
         """Format system prompt, optionally adding cache_control for prompt caching."""
         if not self._prompt_caching:
             return system
@@ -78,7 +78,7 @@ class LLMClient:
         ]
 
     @staticmethod
-    def _extract_cache_tokens(usage: Any) -> tuple[int, int]:
+    def extract_cache_tokens(usage: Any) -> tuple[int, int]:
         """Extract cache token counts from API usage, defaulting to 0."""
         cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
         cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
@@ -90,12 +90,12 @@ class LLMClient:
         jitter = random.uniform(0, self._base_delay)
         return float(min(delay + jitter, self._max_delay))
 
-    def _get_sync_client(self) -> anthropic.Anthropic:
+    def get_sync_client(self) -> anthropic.Anthropic:
         if self._sync_client is None:
             self._sync_client = anthropic.Anthropic(api_key=self._api_key)
         return self._sync_client
 
-    def _get_async_client(self) -> anthropic.AsyncAnthropic:
+    def get_async_client(self) -> anthropic.AsyncAnthropic:
         if self._async_client is None:
             self._async_client = anthropic.AsyncAnthropic(api_key=self._api_key)
         return self._async_client
@@ -109,7 +109,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API synchronously with exponential-backoff retry."""
-        client = self._get_sync_client()
+        client = self.get_sync_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -118,11 +118,11 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=self._format_system(system),
+                    system=self.format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
-                cache_read, cache_creation = self._extract_cache_tokens(response.usage)
+                cache_read, cache_creation = self.extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
@@ -155,7 +155,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API asynchronously with exponential-backoff retry."""
-        client = self._get_async_client()
+        client = self.get_async_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -164,11 +164,11 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=self._format_system(system),
+                    system=self.format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
-                cache_read, cache_creation = self._extract_cache_tokens(response.usage)
+                cache_read, cache_creation = self.extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
