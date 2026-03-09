@@ -80,3 +80,26 @@ class TestCostEstimation:
     def test_unknown_model_uses_sonnet_default(self) -> None:
         cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "unknown-model")
         assert cost == pytest.approx(3.0 + 15.0)
+
+
+class TestLLMResponseCacheFields:
+    def test_default_cache_fields_are_zero(self) -> None:
+        from evoforge.llm.client import LLMResponse
+
+        r = LLMResponse(text="hi", input_tokens=10, output_tokens=5, model="test")
+        assert r.cache_read_tokens == 0
+        assert r.cache_creation_tokens == 0
+
+    def test_cache_fields_can_be_set(self) -> None:
+        from evoforge.llm.client import LLMResponse
+
+        r = LLMResponse(
+            text="hi",
+            input_tokens=10,
+            output_tokens=5,
+            model="test",
+            cache_read_tokens=100,
+            cache_creation_tokens=50,
+        )
+        assert r.cache_read_tokens == 100
+        assert r.cache_creation_tokens == 50

@@ -40,6 +40,8 @@ class LLMResponse:
     input_tokens: int
     output_tokens: int
     model: str
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 class LLMClient:
