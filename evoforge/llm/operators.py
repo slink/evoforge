@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 from evoforge.core.mutation import MutationContext, MutationOperator
 from evoforge.core.types import Individual
+from evoforge.llm.batch import batch_aware_generate
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +44,13 @@ class LLMMutate(MutationOperator):
         prompt = context.backend.format_mutation_prompt(parent, context)
         system = context.backend.system_prompt()
 
-        response = await self._client.async_generate(
-            prompt,
-            system,
-            self._model,
-            context.temperature,
-            self._max_tokens,
+        response = await batch_aware_generate(
+            self._client, prompt, system, self._model, context.temperature, self._max_tokens
         )
+
+        if response is None:
+            logger.warning("LLMMutate: batch request failed, falling back to parent")
+            return parent.genome
 
         genome: str | None = context.backend.extract_genome(response.text)
         if genome is not None:
@@ -91,13 +92,13 @@ class LLMCrossover(MutationOperator):
 
         system = context.backend.system_prompt()
 
-        response = await self._client.async_generate(
-            prompt,
-            system,
-            self._model,
-            context.temperature,
-            self._max_tokens,
+        response = await batch_aware_generate(
+            self._client, prompt, system, self._model, context.temperature, self._max_tokens
         )
+
+        if response is None:
+            logger.warning("LLMCrossover: batch request failed, falling back to parent")
+            return parent.genome
 
         genome: str | None = context.backend.extract_genome(response.text)
         if genome is not None:

@@ -10,6 +10,8 @@ from typing import Any
 
 import jinja2
 
+from evoforge.llm.batch import batch_aware_generate
+
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
@@ -51,13 +53,17 @@ class LLMTacticGenerator:
         )
         logger.debug("Requesting %d tactics for goal: %s", n, goal_state[:80])
         try:
-            response = await self._client.async_generate(
+            response = await batch_aware_generate(
+                self._client,
                 prompt,
                 self._system_prompt,
                 self._model,
                 self._temperature,
                 self._max_tokens,
             )
+            if response is None:
+                logger.warning("Tactic generation batch request failed")
+                return []
         except (RuntimeError, TimeoutError):
             logger.warning("Tactic generation LLM call failed", exc_info=True)
             return []

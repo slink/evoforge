@@ -8,8 +8,10 @@ import logging
 import random
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
+from anthropic.types import TextBlockParam
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,8 @@ class LLMResponse:
     input_tokens: int
     output_tokens: int
     model: str
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
 
 
 class LLMClient:
@@ -51,13 +55,34 @@ class LLMClient:
         max_retries: int = 6,
         base_delay: float = 2.0,
         max_delay: float = 120.0,
+        prompt_caching: bool = True,
     ) -> None:
         self._api_key = api_key
         self._max_retries = max_retries
         self._base_delay = base_delay
         self._max_delay = max_delay
+        self._prompt_caching = prompt_caching
         self._sync_client: anthropic.Anthropic | None = None
         self._async_client: anthropic.AsyncAnthropic | None = None
+
+    def format_system(self, system: str) -> str | list[TextBlockParam]:
+        """Format system prompt, optionally adding cache_control for prompt caching."""
+        if not self._prompt_caching:
+            return system
+        return [
+            TextBlockParam(
+                type="text",
+                text=system,
+                cache_control={"type": "ephemeral"},
+            )
+        ]
+
+    @staticmethod
+    def extract_cache_tokens(usage: Any) -> tuple[int, int]:
+        """Extract cache token counts from API usage, defaulting to 0."""
+        cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
+        return cache_read, cache_creation
 
     def _compute_delay(self, attempt: int) -> float:
         """Compute retry delay with exponential backoff, jitter, and cap."""
@@ -65,12 +90,12 @@ class LLMClient:
         jitter = random.uniform(0, self._base_delay)
         return float(min(delay + jitter, self._max_delay))
 
-    def _get_sync_client(self) -> anthropic.Anthropic:
+    def get_sync_client(self) -> anthropic.Anthropic:
         if self._sync_client is None:
             self._sync_client = anthropic.Anthropic(api_key=self._api_key)
         return self._sync_client
 
-    def _get_async_client(self) -> anthropic.AsyncAnthropic:
+    def get_async_client(self) -> anthropic.AsyncAnthropic:
         if self._async_client is None:
             self._async_client = anthropic.AsyncAnthropic(api_key=self._api_key)
         return self._async_client
@@ -84,7 +109,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API synchronously with exponential-backoff retry."""
-        client = self._get_sync_client()
+        client = self.get_sync_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -93,15 +118,18 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=system,
+                    system=self.format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
+                cache_read, cache_creation = self.extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens,
                     model=model,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_creation,
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
@@ -127,7 +155,7 @@ class LLMClient:
         max_tokens: int = 4096,
     ) -> LLMResponse:
         """Call the Anthropic API asynchronously with exponential-backoff retry."""
-        client = self._get_async_client()
+        client = self.get_async_client()
         last_exc: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -136,15 +164,18 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=system,
+                    system=self.format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
+                cache_read, cache_creation = self.extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens,
                     model=model,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_creation,
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
@@ -162,7 +193,19 @@ class LLMClient:
         raise RuntimeError(msg) from last_exc
 
     @staticmethod
-    def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
+    def estimate_cost(
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        *,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float:
         """Estimate USD cost for the given token counts and model."""
         input_rate, output_rate = _pricing_for_model(model)
-        return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+        return (
+            input_tokens * input_rate
+            + output_tokens * output_rate
+            + cache_read_tokens * input_rate * 0.1
+            + cache_creation_tokens * input_rate * 1.25
+        ) / 1_000_000

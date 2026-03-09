@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import random
 from dataclasses import dataclass
@@ -41,6 +42,7 @@ from evoforge.core.selection import (
     SelectionStrategy,
 )
 from evoforge.core.types import Fitness, Individual
+from evoforge.llm.batch import BatchCollector
 
 logger = logging.getLogger(__name__)
 
@@ -283,36 +285,45 @@ class EvolutionEngine:
                     # Mutate (concurrently)
                     offspring_genomes: list[tuple[str, str, str]] = []
                     guidance = self._memory.prompt_section(max_tokens=200)
-                    tasks: list[asyncio.Task[tuple[str, str, str] | None]] = []
-                    for parent in parents:
-                        operator = self._ensemble.select_operator()
-
-                        # Skip LLM operators when per-gen budget exhausted
-                        if operator.cost == "llm" and not self._scheduler.can_use_llm():
-                            operator = self._ensemble.cheapest_operator()
-
-                        # Pick a second parent for crossover operators
-                        guidance_ind = None
-                        if "crossover" in operator.name:
-                            other_parents = [p for p in parents if p.ir_hash != parent.ir_hash]
-                            if other_parents:
-                                guidance_ind = random.choice(other_parents)
-                            else:
-                                guidance_ind = random.choice(parents)
-
-                        context = MutationContext(
-                            generation=gen,
-                            memory=self._memory,
-                            guidance=guidance,
-                            temperature=self._temperature,
-                            backend=self.backend,
-                            credits=parent.credits,
-                            guidance_individual=guidance_ind,
+                    batch_cm: Any = (
+                        BatchCollector(
+                            self.llm_client,
+                            poll_interval=self.config.llm.batch_poll_interval,
                         )
-                        tasks.append(
-                            asyncio.create_task(self._mutate_one(parent, operator, context))
-                        )
-                    results = await asyncio.gather(*tasks)
+                        if self.config.llm.batch_enabled
+                        else contextlib.nullcontext()
+                    )
+                    async with batch_cm:
+                        tasks: list[asyncio.Task[tuple[str, str, str] | None]] = []
+                        for parent in parents:
+                            operator = self._ensemble.select_operator()
+
+                            # Skip LLM operators when per-gen budget exhausted
+                            if operator.cost == "llm" and not self._scheduler.can_use_llm():
+                                operator = self._ensemble.cheapest_operator()
+
+                            # Pick a second parent for crossover operators
+                            guidance_ind = None
+                            if "crossover" in operator.name:
+                                other_parents = [p for p in parents if p.ir_hash != parent.ir_hash]
+                                if other_parents:
+                                    guidance_ind = random.choice(other_parents)
+                                else:
+                                    guidance_ind = random.choice(parents)
+
+                            context = MutationContext(
+                                generation=gen,
+                                memory=self._memory,
+                                guidance=guidance,
+                                temperature=self._temperature,
+                                backend=self.backend,
+                                credits=parent.credits,
+                                guidance_individual=guidance_ind,
+                            )
+                            tasks.append(
+                                asyncio.create_task(self._mutate_one(parent, operator, context))
+                            )
+                        results = await asyncio.gather(*tasks)
                     for r in results:
                         if r is not None:
                             offspring_genomes.append(r)

@@ -55,6 +55,9 @@ class LLMConfig(BaseModel):
     max_calls: int = 1000
     max_cost_usd: float = 50.0
     max_attempts: int = 3
+    prompt_caching: bool = True
+    batch_enabled: bool = False
+    batch_poll_interval: float = 2.0
 
 
 class EvalConfig(BaseModel):

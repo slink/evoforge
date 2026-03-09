@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -145,3 +145,81 @@ class TestLLMMutateFallback:
         result = await op.apply(parent, ctx)
 
         assert result == "original_genome"  # falls back to parent
+
+
+# ------------------------------------------------------------------ #
+# LLMMutate batch-aware generate tests
+# ------------------------------------------------------------------ #
+
+
+class TestLLMMutateWithBatchAwareGenerate:
+    @pytest.mark.asyncio
+    async def test_uses_batch_aware_generate(self) -> None:
+        """LLMMutate delegates to batch_aware_generate."""
+        client = MagicMock()
+        backend = MagicMock()
+        backend.format_mutation_prompt.return_value = "mutation prompt"
+        backend.system_prompt.return_value = "system"
+        backend.extract_genome.return_value = "batched_genome"
+        ctx = _make_context(backend=backend)
+        parent = make_individual("original")
+
+        op = LLMMutate(client=client, model="test-model")
+
+        with patch(
+            "evoforge.llm.operators.batch_aware_generate",
+            new=AsyncMock(return_value=FakeLLMResponse(text="batched")),
+        ):
+            result = await op.apply(parent, ctx)
+
+        assert result == "batched_genome"
+
+    @pytest.mark.asyncio
+    async def test_batch_returns_none_falls_back_to_parent(self) -> None:
+        """When batch_aware_generate returns None, fall back to parent genome."""
+        client = MagicMock()
+        backend = MagicMock()
+        backend.format_mutation_prompt.return_value = "mutation prompt"
+        backend.system_prompt.return_value = "system"
+        ctx = _make_context(backend=backend)
+        parent = make_individual("original_genome")
+
+        op = LLMMutate(client=client, model="test-model")
+
+        with patch(
+            "evoforge.llm.operators.batch_aware_generate",
+            new=AsyncMock(return_value=None),
+        ):
+            result = await op.apply(parent, ctx)
+
+        assert result == "original_genome"
+
+
+# ------------------------------------------------------------------ #
+# LLMCrossover batch-aware generate tests
+# ------------------------------------------------------------------ #
+
+
+class TestLLMCrossoverWithBatchAwareGenerate:
+    @pytest.mark.asyncio
+    async def test_uses_batch_aware_generate(self) -> None:
+        """LLMCrossover delegates to batch_aware_generate."""
+        client = MagicMock()
+        backend = MagicMock()
+        backend.format_crossover_prompt.return_value = "crossover prompt"
+        backend.system_prompt.return_value = "system"
+        backend.extract_genome.return_value = "batched_genome"
+
+        parent_a = make_individual("genome_a")
+        parent_b = make_individual("genome_b")
+        ctx = _make_context(backend=backend, guidance_individual=parent_b)
+
+        op = LLMCrossover(client=client, model="test-model")
+
+        with patch(
+            "evoforge.llm.operators.batch_aware_generate",
+            new=AsyncMock(return_value=FakeLLMResponse(text="batched")),
+        ):
+            result = await op.apply(parent_a, ctx)
+
+        assert result == "batched_genome"

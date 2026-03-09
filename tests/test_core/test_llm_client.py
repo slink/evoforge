@@ -80,3 +80,160 @@ class TestCostEstimation:
     def test_unknown_model_uses_sonnet_default(self) -> None:
         cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "unknown-model")
         assert cost == pytest.approx(3.0 + 15.0)
+
+
+class TestCostEstimationWithCache:
+    def test_cache_read_tokens_at_10_percent(self) -> None:
+        cost = LLMClient.estimate_cost(
+            input_tokens=0,
+            output_tokens=0,
+            model="claude-sonnet-4-5-20250929",
+            cache_read_tokens=1_000_000,
+            cache_creation_tokens=0,
+        )
+        assert cost == pytest.approx(0.30)
+
+    def test_cache_creation_tokens_at_125_percent(self) -> None:
+        cost = LLMClient.estimate_cost(
+            input_tokens=0,
+            output_tokens=0,
+            model="claude-sonnet-4-5-20250929",
+            cache_read_tokens=0,
+            cache_creation_tokens=1_000_000,
+        )
+        assert cost == pytest.approx(3.75)
+
+    def test_mixed_cache_and_regular_tokens(self) -> None:
+        cost = LLMClient.estimate_cost(
+            input_tokens=100_000,
+            output_tokens=50_000,
+            model="claude-sonnet-4-5-20250929",
+            cache_read_tokens=500_000,
+            cache_creation_tokens=200_000,
+        )
+        assert cost == pytest.approx(0.30 + 0.75 + 0.15 + 0.75)
+
+    def test_existing_cost_estimation_unchanged(self) -> None:
+        cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "claude-haiku-4-5-20251001")
+        assert cost == pytest.approx(0.25 + 1.25)
+
+
+class TestLLMResponseCacheFields:
+    def test_default_cache_fields_are_zero(self) -> None:
+        from evoforge.llm.client import LLMResponse
+
+        r = LLMResponse(text="hi", input_tokens=10, output_tokens=5, model="test")
+        assert r.cache_read_tokens == 0
+        assert r.cache_creation_tokens == 0
+
+    def test_cache_fields_can_be_set(self) -> None:
+        from evoforge.llm.client import LLMResponse
+
+        r = LLMResponse(
+            text="hi",
+            input_tokens=10,
+            output_tokens=5,
+            model="test",
+            cache_read_tokens=100,
+            cache_creation_tokens=50,
+        )
+        assert r.cache_read_tokens == 100
+        assert r.cache_creation_tokens == 50
+
+
+class TestPromptCaching:
+    async def test_async_generate_sends_cache_control_when_enabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=True)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = 100
+        mock_response.usage.cache_creation_input_tokens = 0
+
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = await client.async_generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == [
+                {
+                    "type": "text",
+                    "text": "system text",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            assert result.cache_read_tokens == 100
+            assert result.cache_creation_tokens == 0
+
+    async def test_async_generate_no_cache_control_when_disabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=False)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = None
+        mock_response.usage.cache_creation_input_tokens = None
+
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = await client.async_generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == "system text"
+            assert result.cache_read_tokens == 0
+            assert result.cache_creation_tokens == 0
+
+    def test_sync_generate_sends_cache_control_when_enabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=True)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = 50
+        mock_response.usage.cache_creation_input_tokens = 200
+
+        with patch("anthropic.Anthropic") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.messages.create = MagicMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = client.generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == [
+                {
+                    "type": "text",
+                    "text": "system text",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            assert result.cache_read_tokens == 50
+            assert result.cache_creation_tokens == 200
+
+    async def test_default_prompt_caching_is_true(self) -> None:
+        client = LLMClient(api_key="test")
+        assert client._prompt_caching is True
+
+
+class TestLLMConfigCacheFields:
+    def test_prompt_caching_defaults_true(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.prompt_caching is True
+
+    def test_prompt_caching_can_be_disabled(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig(prompt_caching=False)
+        assert cfg.prompt_caching is False
