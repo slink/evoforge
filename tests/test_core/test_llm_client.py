@@ -223,3 +223,17 @@ class TestPromptCaching:
     async def test_default_prompt_caching_is_true(self) -> None:
         client = LLMClient(api_key="test")
         assert client._prompt_caching is True
+
+
+class TestLLMConfigCacheFields:
+    def test_prompt_caching_defaults_true(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.prompt_caching is True
+
+    def test_prompt_caching_can_be_disabled(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig(prompt_caching=False)
+        assert cfg.prompt_caching is False
