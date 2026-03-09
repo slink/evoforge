@@ -91,7 +91,7 @@ evoforge/
                 ablation credit, expression mutation operators
   llm/        — Anthropic client, LLM mutation/crossover operators,
                 Jinja2 prompt templates, batch API collector
-tests/        — 681 tests, strict mypy, ruff
+tests/        — 679 tests, strict mypy, ruff
 configs/      — TOML experiment configs
 scripts/      — CLI entry point (run.py)
 ```
