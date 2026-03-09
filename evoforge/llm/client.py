@@ -164,7 +164,19 @@ class LLMClient:
         raise RuntimeError(msg) from last_exc
 
     @staticmethod
-    def estimate_cost(input_tokens: int, output_tokens: int, model: str) -> float:
+    def estimate_cost(
+        input_tokens: int,
+        output_tokens: int,
+        model: str,
+        *,
+        cache_read_tokens: int = 0,
+        cache_creation_tokens: int = 0,
+    ) -> float:
         """Estimate USD cost for the given token counts and model."""
         input_rate, output_rate = _pricing_for_model(model)
-        return (input_tokens * input_rate + output_tokens * output_rate) / 1_000_000
+        return (
+            input_tokens * input_rate
+            + output_tokens * output_rate
+            + cache_read_tokens * input_rate * 0.1
+            + cache_creation_tokens * input_rate * 1.25
+        ) / 1_000_000
