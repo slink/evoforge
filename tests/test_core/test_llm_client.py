@@ -139,3 +139,87 @@ class TestLLMResponseCacheFields:
         )
         assert r.cache_read_tokens == 100
         assert r.cache_creation_tokens == 50
+
+
+class TestPromptCaching:
+    async def test_async_generate_sends_cache_control_when_enabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=True)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = 100
+        mock_response.usage.cache_creation_input_tokens = 0
+
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = await client.async_generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == [
+                {
+                    "type": "text",
+                    "text": "system text",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            assert result.cache_read_tokens == 100
+            assert result.cache_creation_tokens == 0
+
+    async def test_async_generate_no_cache_control_when_disabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=False)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = None
+        mock_response.usage.cache_creation_input_tokens = None
+
+        with patch("anthropic.AsyncAnthropic") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_instance.messages.create = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = await client.async_generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == "system text"
+            assert result.cache_read_tokens == 0
+            assert result.cache_creation_tokens == 0
+
+    def test_sync_generate_sends_cache_control_when_enabled(self) -> None:
+        client = LLMClient(api_key="test", prompt_caching=True)
+
+        mock_response = MagicMock()
+        mock_response.content = [MagicMock(text="result")]
+        mock_response.usage.input_tokens = 10
+        mock_response.usage.output_tokens = 5
+        mock_response.usage.cache_read_input_tokens = 50
+        mock_response.usage.cache_creation_input_tokens = 200
+
+        with patch("anthropic.Anthropic") as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.messages.create = MagicMock(return_value=mock_response)
+            mock_cls.return_value = mock_instance
+
+            result = client.generate("prompt", "system text", "haiku", 0.7)
+
+            call_kwargs = mock_instance.messages.create.call_args[1]
+            assert call_kwargs["system"] == [
+                {
+                    "type": "text",
+                    "text": "system text",
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+            assert result.cache_read_tokens == 50
+            assert result.cache_creation_tokens == 200
+
+    async def test_default_prompt_caching_is_true(self) -> None:
+        client = LLMClient(api_key="test")
+        assert client._prompt_caching is True

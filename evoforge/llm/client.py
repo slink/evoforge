@@ -8,8 +8,10 @@ import logging
 import random
 import time
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
+from anthropic.types import TextBlockParam
 
 logger = logging.getLogger(__name__)
 
@@ -53,13 +55,34 @@ class LLMClient:
         max_retries: int = 6,
         base_delay: float = 2.0,
         max_delay: float = 120.0,
+        prompt_caching: bool = True,
     ) -> None:
         self._api_key = api_key
         self._max_retries = max_retries
         self._base_delay = base_delay
         self._max_delay = max_delay
+        self._prompt_caching = prompt_caching
         self._sync_client: anthropic.Anthropic | None = None
         self._async_client: anthropic.AsyncAnthropic | None = None
+
+    def _format_system(self, system: str) -> str | list[TextBlockParam]:
+        """Format system prompt, optionally adding cache_control for prompt caching."""
+        if not self._prompt_caching:
+            return system
+        return [
+            TextBlockParam(
+                type="text",
+                text=system,
+                cache_control={"type": "ephemeral"},
+            )
+        ]
+
+    @staticmethod
+    def _extract_cache_tokens(usage: Any) -> tuple[int, int]:
+        """Extract cache token counts from API usage, defaulting to 0."""
+        cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+        cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
+        return cache_read, cache_creation
 
     def _compute_delay(self, attempt: int) -> float:
         """Compute retry delay with exponential backoff, jitter, and cap."""
@@ -95,15 +118,18 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=system,
+                    system=self._format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
+                cache_read, cache_creation = self._extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens,
                     model=model,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_creation,
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
@@ -138,15 +164,18 @@ class LLMClient:
                     model=model,
                     max_tokens=max_tokens,
                     temperature=temperature,
-                    system=system,
+                    system=self._format_system(system),
                     messages=[{"role": "user", "content": prompt}],
                 )
                 text = response.content[0].text  # type: ignore[union-attr]
+                cache_read, cache_creation = self._extract_cache_tokens(response.usage)
                 return LLMResponse(
                     text=text,
                     input_tokens=response.usage.input_tokens,
                     output_tokens=response.usage.output_tokens,
                     model=model,
+                    cache_read_tokens=cache_read,
+                    cache_creation_tokens=cache_creation,
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
