@@ -41,6 +41,7 @@ from evoforge.core.selection import (
     SelectionStrategy,
 )
 from evoforge.core.types import Fitness, Individual
+from evoforge.llm.batch import BatchCollector
 
 logger = logging.getLogger(__name__)
 
@@ -312,7 +313,14 @@ class EvolutionEngine:
                         tasks.append(
                             asyncio.create_task(self._mutate_one(parent, operator, context))
                         )
-                    results = await asyncio.gather(*tasks)
+                    if self.config.llm.batch_enabled:
+                        async with BatchCollector(
+                            self.llm_client,
+                            poll_interval=self.config.llm.batch_poll_interval,
+                        ):
+                            results = await asyncio.gather(*tasks)
+                    else:
+                        results = await asyncio.gather(*tasks)
                     for r in results:
                         if r is not None:
                             offspring_genomes.append(r)

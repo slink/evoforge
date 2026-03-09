@@ -182,3 +182,21 @@ class TestGetBatchCollector:
             assert get_batch_collector() is collector
 
         assert get_batch_collector() is None
+
+
+class TestBatchConfigFields:
+    """Verify LLMConfig batch fields have correct defaults and are settable."""
+
+    def test_batch_defaults(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert cfg.batch_enabled is False
+        assert cfg.batch_poll_interval == 2.0
+
+    def test_batch_can_be_enabled(self) -> None:
+        from evoforge.core.config import LLMConfig
+
+        cfg = LLMConfig(batch_enabled=True, batch_poll_interval=5.0)
+        assert cfg.batch_enabled is True
+        assert cfg.batch_poll_interval == 5.0
