@@ -67,7 +67,8 @@ graph TD
 - **Selection** (`evoforge/core/selection.py`) — four strategies. Lexicase is the default and tends to maintain more diversity than tournament.
 - **Search memory** (`evoforge/core/memory.py`) — tracks patterns that led to fitness gains and dead ends to avoid. Fed into LLM prompts so the model learns from the population's history.
 - **Tree search** (`evoforge/backends/lean/tree_search.py`) — best-first search over REPL proof states. Used as a refinement step on promising partial proofs found by evolution.
-- **LLM client** (`evoforge/llm/client.py`) — Anthropic API wrapper with exponential backoff, budget tracking, and graceful degradation (if calls fail, cheap operators fill in).
+- **LLM client** (`evoforge/llm/client.py`) — Anthropic API wrapper with exponential backoff, prompt caching (90% input cost reduction on repeated system prompts), budget tracking, and graceful degradation (if calls fail, cheap operators fill in).
+- **Batch collector** (`evoforge/llm/batch.py`) — optional Message Batch API integration that collects per-generation LLM requests into a single batch for 50% cost savings (stacks with prompt caching for up to 95% savings on cached input tokens). Falls back to individual calls on failure.
 
 ### Proof verification
 
@@ -89,8 +90,8 @@ evoforge/
     cfd/      — CFD turbulence closure optimization: SymPy IR, solver adapter,
                 ablation credit, expression mutation operators
   llm/        — Anthropic client, LLM mutation/crossover operators,
-                Jinja2 prompt templates
-tests/        — 652 tests, strict mypy, ruff
+                Jinja2 prompt templates, batch API collector
+tests/        — 681 tests, strict mypy, ruff
 configs/      — TOML experiment configs
 scripts/      — CLI entry point (run.py)
 ```
@@ -144,7 +145,7 @@ Experiments are configured via TOML files. See `configs/lean_default.toml` for a
 | `[population]` | Size, elite count |
 | `[selection]` | Strategy (lexicase, tournament, pareto, map_elites), parameters |
 | `[mutation]` | LLM vs cheap operator weights, crossover weight |
-| `[llm]` | Model, temperature schedule, token/cost budgets |
+| `[llm]` | Model, temperature schedule, token/cost budgets, prompt caching, batch API |
 | `[evolution]` | Max generations, stagnation window, tree search settings, checkpointing |
 | `[backend]` | Theorem statement, project dir, imports, seed proofs |
 | `[ablation]` | Flags to disable individual components for experiments |
@@ -167,6 +168,5 @@ Research software. The core evolutionary engine, LLM integration, and Lean 4 bac
 
 Known limitations:
 - Two backends (Lean 4 on hold, CFD active)
-- LLM mutations are expensive and the search space is vast
 - Tree search helps but is limited by the quality of tactic suggestions
 - `greenlet` pinned to 3.1.0 due to a macOS compiler crash on newer versions
