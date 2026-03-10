@@ -51,7 +51,7 @@ graph TD
     Engine --> Arc[Archive<br/>SQLite]
     Engine --> Sched[Scheduler<br/>async batching + budget limits]
     Mut --> Backend[Backend ABC]
-    Mut --> LLM[LLM Client<br/>Anthropic API]
+    Mut --> LLM[LLM Client<br/>Anthropic · Gemini · OpenAI]
     Eval --> Backend
     Backend -.-> Lean[Lean Backend<br/>REPL · stepwise credit · verification]
     Backend -.-> CFD[CFD Backend<br/>SymPy IR · solver adapter · ablation credit]
@@ -67,7 +67,7 @@ graph TD
 - **Selection** (`evoforge/core/selection.py`) — four strategies. Lexicase is the default and tends to maintain more diversity than tournament.
 - **Search memory** (`evoforge/core/memory.py`) — tracks patterns that led to fitness gains and dead ends to avoid. Fed into LLM prompts so the model learns from the population's history.
 - **Tree search** (`evoforge/backends/lean/tree_search.py`) — best-first search over REPL proof states. Used as a refinement step on promising partial proofs found by evolution.
-- **LLM client** (`evoforge/llm/client.py`) — Anthropic API wrapper with exponential backoff, prompt caching (90% input cost reduction on repeated system prompts), budget tracking, and graceful degradation (if calls fail, cheap operators fill in).
+- **LLM client** (`evoforge/llm/client.py`) — multi-provider LLM wrapper (Anthropic, Gemini, OpenAI-compatible) with exponential backoff, prompt caching (90% input cost reduction on repeated system prompts), budget tracking, and graceful degradation (if calls fail, cheap operators fill in). Provider is selected per-run via TOML config.
 - **Batch collector** (`evoforge/llm/batch.py`) — optional Message Batch API integration that collects per-generation LLM requests into a single batch for 50% cost savings (stacks with prompt caching for up to 95% savings on cached input tokens). Falls back to individual calls on failure.
 
 ### Proof verification
@@ -89,9 +89,10 @@ evoforge/
                 tree search, tactic generation, API extraction (on hold)
     cfd/      — CFD turbulence closure optimization: SymPy IR, solver adapter,
                 ablation credit, expression mutation operators
-  llm/        — Anthropic client, LLM mutation/crossover operators,
-                Jinja2 prompt templates, batch API collector
-tests/        — 679 tests, strict mypy, ruff
+  llm/        — multi-provider LLM client (Anthropic, Gemini, OpenAI),
+                mutation/crossover operators, Jinja2 prompt templates,
+                batch API collector
+tests/        — 711 tests, strict mypy, ruff
 configs/      — TOML experiment configs
 scripts/      — CLI entry point (run.py)
 ```
@@ -134,7 +135,7 @@ uv run python scripts/run.py --config configs/lean_default.toml \
   --output-dir runs/exp1 --resume
 ```
 
-Requires `ANTHROPIC_API_KEY` in your environment for LLM-guided mutations. Without it, the engine falls back to cheap operators only.
+Requires an API key for your chosen LLM provider (`ANTHROPIC_API_KEY` by default, configurable via `llm.api_key_env` in TOML). Without it, the engine falls back to cheap operators only.
 
 ## Configuration
 
@@ -145,7 +146,7 @@ Experiments are configured via TOML files. See `configs/lean_default.toml` for a
 | `[population]` | Size, elite count |
 | `[selection]` | Strategy (lexicase, tournament, pareto, map_elites), parameters |
 | `[mutation]` | LLM vs cheap operator weights, crossover weight |
-| `[llm]` | Model, temperature schedule, token/cost budgets, prompt caching, batch API |
+| `[llm]` | Provider (anthropic/gemini/openai), model, temperature schedule, token/cost budgets, prompt caching, batch API |
 | `[evolution]` | Max generations, stagnation window, tree search settings, checkpointing |
 | `[backend]` | Theorem statement, project dir, imports, seed proofs |
 | `[ablation]` | Flags to disable individual components for experiments |
@@ -155,6 +156,7 @@ Experiments are configured via TOML files. See `configs/lean_default.toml` for a
 - Python 3.11+
 - [uv](https://github.com/astral-sh/uv) for package management
 - anthropic, pydantic, jinja2, sqlalchemy, aiosqlite, numpy, sympy, rich
+- Optional: `google-genai` (Gemini provider), `openai` (OpenAI/Ollama/vLLM provider)
 - For the Lean backend: a Lean 4 project with the REPL package built
 - For the CFD backend: fluidflow (sibling project) or a compatible RANS solver
 
