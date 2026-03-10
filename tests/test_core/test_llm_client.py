@@ -74,17 +74,17 @@ class TestRetryWithJitter:
 
 class TestCostEstimation:
     def test_haiku_pricing(self) -> None:
-        cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "claude-haiku-4-5-20251001")
+        cost = LLMClient().estimate_cost(1_000_000, 1_000_000, "claude-haiku-4-5-20251001")
         assert cost == pytest.approx(0.25 + 1.25)
 
     def test_unknown_model_uses_sonnet_default(self) -> None:
-        cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "unknown-model")
+        cost = LLMClient().estimate_cost(1_000_000, 1_000_000, "unknown-model")
         assert cost == pytest.approx(3.0 + 15.0)
 
 
 class TestCostEstimationWithCache:
     def test_cache_read_tokens_at_10_percent(self) -> None:
-        cost = LLMClient.estimate_cost(
+        cost = LLMClient().estimate_cost(
             input_tokens=0,
             output_tokens=0,
             model="claude-sonnet-4-5-20250929",
@@ -94,7 +94,7 @@ class TestCostEstimationWithCache:
         assert cost == pytest.approx(0.30)
 
     def test_cache_creation_tokens_at_125_percent(self) -> None:
-        cost = LLMClient.estimate_cost(
+        cost = LLMClient().estimate_cost(
             input_tokens=0,
             output_tokens=0,
             model="claude-sonnet-4-5-20250929",
@@ -104,7 +104,7 @@ class TestCostEstimationWithCache:
         assert cost == pytest.approx(3.75)
 
     def test_mixed_cache_and_regular_tokens(self) -> None:
-        cost = LLMClient.estimate_cost(
+        cost = LLMClient().estimate_cost(
             input_tokens=100_000,
             output_tokens=50_000,
             model="claude-sonnet-4-5-20250929",
@@ -114,7 +114,7 @@ class TestCostEstimationWithCache:
         assert cost == pytest.approx(0.30 + 0.75 + 0.15 + 0.75)
 
     def test_existing_cost_estimation_unchanged(self) -> None:
-        cost = LLMClient.estimate_cost(1_000_000, 1_000_000, "claude-haiku-4-5-20251001")
+        cost = LLMClient().estimate_cost(1_000_000, 1_000_000, "claude-haiku-4-5-20251001")
         assert cost == pytest.approx(0.25 + 1.25)
 
 

@@ -45,6 +45,9 @@ class MutationConfig(BaseModel):
 class LLMConfig(BaseModel):
     """LLM backend configuration and budget limits."""
 
+    provider: Literal["anthropic", "gemini", "openai"] = "anthropic"
+    api_key_env: str = "ANTHROPIC_API_KEY"
+    base_url: str | None = None
     model: str = "claude-sonnet-4-5-20250929"
     reflection_model: str = "claude-sonnet-4-5-20250929"
     temperature: float = 0.7

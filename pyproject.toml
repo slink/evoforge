@@ -17,6 +17,11 @@ dependencies = [
     "fluidflow",
 ]
 
+[project.optional-dependencies]
+gemini = ["google-genai>=1.66.0"]
+openai = ["openai>=1.0.0"]
+all-providers = ["google-genai>=1.66.0", "openai>=1.0.0"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -58,6 +63,14 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "sympy.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "google.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "openai.*"
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

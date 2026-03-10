@@ -110,11 +110,25 @@ def main() -> None:
 
     # Create LLM client if API key is available
     llm_client = None
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get(config.llm.api_key_env)
     if api_key:
         from evoforge.llm.client import LLMClient
+        from evoforge.llm.providers import create_provider
 
-        llm_client = LLMClient(api_key=api_key)
+        provider = create_provider(config)
+        llm_client = LLMClient(api_key=api_key, provider=provider)
+        # NOTE: Batch API is Anthropic-only. When using a non-Anthropic provider,
+        # batch_enabled should be False (the BatchCollector accesses the raw
+        # anthropic.AsyncAnthropic client). Per-provider batch abstraction is a
+        # future extension — Gemini and OpenAI both offer batch APIs with
+        # different semantics.
+        if config.llm.provider != "anthropic" and config.llm.batch_enabled:
+            logging.getLogger(__name__).warning(
+                "Batch API is only supported with the Anthropic provider. "
+                "Disabling batch mode for provider=%r.",
+                config.llm.provider,
+            )
+            config.llm.batch_enabled = False
 
     # Create engine
     from evoforge.core.engine import EvolutionEngine
