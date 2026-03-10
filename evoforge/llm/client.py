@@ -5,15 +5,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 from dataclasses import dataclass
-from typing import Any
-
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 from anthropic.types import TextBlockParam
+
+from evoforge.llm.retry import compute_delay
 
 if TYPE_CHECKING:
     from evoforge.llm.providers.base import LLMProvider
@@ -96,12 +95,6 @@ class LLMClient:
         cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
         return cache_read, cache_creation
 
-    def _compute_delay(self, attempt: int) -> float:
-        """Compute retry delay with exponential backoff, jitter, and cap."""
-        delay = self._base_delay * (2**attempt)
-        jitter = random.uniform(0, self._base_delay)
-        return float(min(delay + jitter, self._max_delay))
-
     def get_sync_client(self) -> anthropic.Anthropic:
         if self._sync_client is None:
             self._sync_client = anthropic.Anthropic(api_key=self._api_key)
@@ -153,7 +146,7 @@ class LLMClient:
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
-                delay = self._compute_delay(attempt)
+                delay = compute_delay(attempt, self._base_delay, self._max_delay)
                 logger.warning(
                     "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,
@@ -207,7 +200,7 @@ class LLMClient:
                 )
             except (anthropic.RateLimitError, anthropic.APIError) as exc:
                 last_exc = exc
-                delay = self._compute_delay(attempt)
+                delay = compute_delay(attempt, self._base_delay, self._max_delay)
                 logger.warning(
                     "LLM API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import random
 import time
 from typing import Any
 
 from evoforge.llm.client import LLMResponse
 from evoforge.llm.providers.base import LLMProvider
+from evoforge.llm.retry import compute_delay
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +17,12 @@ logger = logging.getLogger(__name__)
 openai: Any = None
 
 # Pricing per million tokens: (input_cost, output_cost) in USD
-# Sorted by key length descending so longest match wins.
-_MODEL_PRICING: dict[str, tuple[float, float]] = {
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4.1": (2.0, 8.0),
-    "gpt-4o": (2.50, 10.0),
-}
+# Pre-sorted by key length descending so longest match wins.
+_MODEL_PRICING: list[tuple[str, tuple[float, float]]] = [
+    ("gpt-4o-mini", (0.15, 0.60)),
+    ("gpt-4.1", (2.0, 8.0)),
+    ("gpt-4o", (2.50, 10.0)),
+]
 
 _DEFAULT_PRICING: tuple[float, float] = (2.50, 10.0)  # gpt-4o
 
@@ -44,9 +44,9 @@ def _ensure_openai() -> Any:
 def _pricing_for_model(model: str) -> tuple[float, float]:
     """Return (input_cost, output_cost) per million tokens, longest key match first."""
     model_lower = model.lower()
-    for key in sorted(_MODEL_PRICING, key=len, reverse=True):
+    for key, pricing in _MODEL_PRICING:
         if key in model_lower:
-            return _MODEL_PRICING[key]
+            return pricing
     return _DEFAULT_PRICING
 
 
@@ -72,12 +72,6 @@ class OpenAIProvider(LLMProvider):
         self._max_delay = max_delay
         self._sync_client: Any = None
         self._async_client: Any = None
-
-    def _compute_delay(self, attempt: int) -> float:
-        """Compute retry delay with exponential backoff, jitter, and cap."""
-        delay = self._base_delay * (2**attempt)
-        jitter = random.uniform(0, self._base_delay)
-        return float(min(delay + jitter, self._max_delay))
 
     def _get_sync_client(self) -> Any:
         if self._sync_client is None:
@@ -131,7 +125,7 @@ class OpenAIProvider(LLMProvider):
                 return self._parse_response(response, model)
             except (openai.RateLimitError, openai.APIError) as exc:
                 last_exc = exc
-                delay = self._compute_delay(attempt)
+                delay = compute_delay(attempt, self._base_delay, self._max_delay)
                 logger.warning(
                     "OpenAI API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,
@@ -168,7 +162,7 @@ class OpenAIProvider(LLMProvider):
                 return self._parse_response(response, model)
             except (openai.RateLimitError, openai.APIError) as exc:
                 last_exc = exc
-                delay = self._compute_delay(attempt)
+                delay = compute_delay(attempt, self._base_delay, self._max_delay)
                 logger.warning(
                     "OpenAI API error (attempt %d/%d), retrying in %.1fs: %s",
                     attempt + 1,

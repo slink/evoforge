@@ -33,9 +33,10 @@ class TestRetryWithJitter:
 
     async def test_delay_capped_at_max(self) -> None:
         """Delay should never exceed max_delay."""
-        client = LLMClient(api_key="test", max_retries=10, base_delay=1.0, max_delay=5.0)
+        from evoforge.llm.retry import compute_delay
+
         for attempt in range(10):
-            delay = client._compute_delay(attempt)
+            delay = compute_delay(attempt, base_delay=1.0, max_delay=5.0)
             assert delay <= 5.0
 
     async def test_success_on_retry(self) -> None:
@@ -64,8 +65,9 @@ class TestRetryWithJitter:
 
     def test_compute_delay_exponential(self) -> None:
         """Delay grows exponentially (before jitter)."""
-        client = LLMClient(base_delay=1.0, max_delay=1000.0)
-        delays = [client._compute_delay(i) for i in range(5)]
+        from evoforge.llm.retry import compute_delay
+
+        delays = [compute_delay(i, base_delay=1.0, max_delay=1000.0) for i in range(5)]
         # Each base is 1, 2, 4, 8, 16 plus jitter [0, 1)
         # So each should be >= base * 2^attempt
         for i, d in enumerate(delays):
